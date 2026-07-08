@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     ingested_at       TEXT NOT NULL,
     processed_at      TEXT,               -- NULL until detection has run
     model_name        TEXT,
-    model_version     TEXT
+    model_version     TEXT,
+    parameters_json   TEXT                -- params that produced the events (provenance)
 );
 
 CREATE TABLE IF NOT EXISTS bark_events (
@@ -89,10 +90,11 @@ class Store:
         return cur.fetchall()
 
     def mark_processed(self, recording_id: int, processed_at: str,
-                       model_name: str, model_version: str):
+                       model_name: str, model_version: str, parameters_json: str):
         self.conn.execute(
-            "UPDATE recordings SET processed_at=?, model_name=?, model_version=? WHERE id=?",
-            (processed_at, model_name, model_version, recording_id),
+            "UPDATE recordings SET processed_at=?, model_name=?, model_version=?, "
+            "parameters_json=? WHERE id=?",
+            (processed_at, model_name, model_version, parameters_json, recording_id),
         )
         self.conn.commit()
 

@@ -37,27 +37,37 @@ python -c "import torch, panns_inference, librosa, soundfile; print('ok')"
 `ffmpeg` is installed into the env by conda — no separate install needed. The
 PANNs model checkpoint (~300 MB) downloads automatically on first `analyze`.
 
-Edit `config.yml` before first use — at minimum set `timezone` to match the
-recorder's clock, and confirm the detection `threshold`.
+Edit `config.yml` before first use — at minimum set `run.source` (the SD card
+path), `timezone` to match the recorder's clock, and confirm the detection
+`threshold`.
 
 ## Usage
 
-Every few days, plug in the SD card and run one command (replace `E:\` with the
-card's drive letter):
+The pipeline takes **no command-line arguments** — everything is configured in
+`config.yml`. Set `run.source` and `run.steps`, then run:
 
 ```bash
-python -m barkdetect run --source E:\
+python -m barkdetect
 ```
 
-Or step by step:
+`run.steps` controls what happens, in order. For the normal every-few-days
+operation, leave it as:
+
+```yaml
+run:
+  source: "E:/DCIM"
+  steps: [ingest, analyze, export]
+```
+
+To only re-export: `steps: [export]`. To re-analyze without re-copying:
+`steps: [analyze, export]`. To use an alternate config file:
 
 ```bash
-python -m barkdetect ingest  --source E:\   # copy + register new files
-python -m barkdetect analyze                # detect barks (only unprocessed files)
-python -m barkdetect export                 # regenerate results.json
+BARKDETECT_CONFIG=other.yml python -m barkdetect
 ```
 
-Re-running is safe: files already ingested (same SHA-256) are skipped.
+Re-running is safe: files already ingested (same SHA-256) are skipped, and only
+unprocessed recordings are analyzed.
 
 ## Output layout
 
@@ -69,10 +79,12 @@ data/
   export/results.json frontend input
 ```
 
-`results.json` contains: `recordings`, `coverage`, `gaps`, `daily_summary`,
-and `events` (each with `abs_start_local`, `class`, `peak_conf`, `night`,
-`snippet_url`). Serve `data/export/` and `data/snippets/` as static files to the
-frontend.
+`results.json` contains: `parameters` (the model/normalization/detection
+settings used — recorded for reproducibility), `recordings`, `coverage`, `gaps`,
+`daily_summary`, and `events` (each with `abs_start_local`, `class`, `peak_conf`,
+`night`, `snippet_url`). Each recording also carries the exact `parameters` that
+produced its events. Serve `data/export/` and `data/snippets/` as static files
+to the frontend.
 
 ## Tests
 

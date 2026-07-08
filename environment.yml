@@ -12,6 +12,7 @@ dependencies:
   - mutagen
   - pyyaml
   - tqdm
+  - tzdata        # IANA timezone DB — required by zoneinfo on Windows
   - pip
   # PyTorch CPU build. If this solve is slow/fails, install torch afterwards
   # following https://pytorch.org (CPU variant) inside the activated env.

@@ -1,11 +1,20 @@
-"""Load and expose config.yml as a nested attribute object."""
+"""Load and expose config.yml as a nested attribute object.
+
+The pipeline is entirely config-driven: there are no command-line arguments.
+The config file is `config.yml` in the current directory, overridable via the
+BARKDETECT_CONFIG environment variable.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+
+DEFAULT_CONFIG = "config.yml"
+CONFIG_ENV_VAR = "BARKDETECT_CONFIG"
 
 
 def _to_ns(obj):
@@ -22,11 +31,15 @@ class Config:
         self._raw = data
         self.project_root = project_root
         self.timezone = data["timezone"]
+        self.run = _to_ns(data["run"])
+        self.model = _to_ns(data["model"])
         self.audio = _to_ns(data["audio"])
         self.normalization = _to_ns(data["normalization"])
         self.detection = _to_ns(data["detection"])
+        self.ingest = _to_ns(data["ingest"])
         self.snippets = _to_ns(data["snippets"])
         self.coverage = _to_ns(data["coverage"])
+        self.export = _to_ns(data["export"])
         self._paths = data["paths"]
 
     def path(self, key: str) -> Path:
@@ -34,9 +47,36 @@ class Config:
         p = Path(self._paths[key])
         return p if p.is_absolute() else (self.project_root / p)
 
+    def params_snapshot(self) -> dict:
+        """The parameters that materially affect detection results.
+
+        Persisted per recording and echoed in results.json so any exported
+        result is reproducible to the exact settings that produced it.
+        """
+        return {
+            "model": {
+                "name": self.model.name,
+                "version": self.model.version,
+                "device": self.model.device,
+            },
+            "normalization": dict(vars(self.normalization)),
+            "detection": dict(vars(self.detection)),
+            "audio": {
+                "sample_rate": self.audio.sample_rate,
+                "window_seconds": self.audio.window_seconds,
+            },
+        }
+
     @classmethod
-    def load(cls, config_path: str | Path = "config.yml") -> "Config":
+    def load(cls, config_path: str | Path = DEFAULT_CONFIG) -> "Config":
         config_path = Path(config_path).resolve()
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
         with open(config_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return cls(data, project_root=config_path.parent)
+
+    @classmethod
+    def resolve(cls) -> "Config":
+        """Load the active config, honoring the BARKDETECT_CONFIG env var."""
+        return cls.load(os.environ.get(CONFIG_ENV_VAR, DEFAULT_CONFIG))

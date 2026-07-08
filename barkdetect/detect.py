@@ -8,17 +8,15 @@ import numpy as np
 
 from .audio import normalize_window, stream_windows
 
-MODEL_NAME = "PANNs Cnn14_DecisionLevelMax"
 
-
-def load_model(device: str = "cpu"):
+def load_model(device: str = "cpu", checkpoint_path: str | None = None):
     """Instantiate the PANNs SED model and return (model, labels)."""
     from panns_inference import SoundEventDetection
     try:
         from panns_inference import labels
     except ImportError:  # older/newer layouts
         from panns_inference.config import labels
-    model = SoundEventDetection(checkpoint_path=None, device=device)
+    model = SoundEventDetection(checkpoint_path=checkpoint_path, device=device)
     return model, list(labels)
 
 

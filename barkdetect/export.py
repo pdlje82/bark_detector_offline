@@ -61,6 +61,7 @@ def build_export(cfg, store: Store) -> dict:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": cfg.timezone,
+        "parameters": cfg.params_snapshot(),   # current config used for this export
         "recording_count": len(recordings),
         "event_count": len(event_list),
         "recordings": [{
@@ -71,6 +72,10 @@ def build_export(cfg, store: Store) -> dict:
             "duration_sec": r["duration_sec"],
             "timestamp_source": r["timestamp_source"],
             "processed_at": r["processed_at"],
+            "model_name": r["model_name"],
+            "model_version": r["model_version"],
+            # parameters that actually produced this recording's events
+            "parameters": json.loads(r["parameters_json"]) if r["parameters_json"] else None,
         } for r in recordings],
         "coverage": coverage,
         "gaps": gaps,
@@ -83,7 +88,7 @@ def export(cfg, store: Store) -> Path:
     data = build_export(cfg, store)
     export_dir = cfg.path("export_dir")
     export_dir.mkdir(parents=True, exist_ok=True)
-    out = export_dir / "results.json"
+    out = export_dir / cfg.export.filename
     with open(out, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     print(f"  wrote {out}  ({data['event_count']} events, "

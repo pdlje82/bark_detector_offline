@@ -1,9 +1,13 @@
-"""Command-line entry point: ingest / analyze / export / run."""
+"""Config-driven entry point. No command-line arguments.
+
+Reads `run.steps` from the config and executes each stage in order. Configure
+which steps run, the source path, and every parameter in config.yml.
+"""
 
 from __future__ import annotations
 
-import argparse
 import sys
+from pathlib import Path
 
 from .analyze import analyze
 from .config import Config
@@ -11,75 +15,45 @@ from .export import export
 from .ingest import ingest
 from .store import Store
 
+# step name -> callable(cfg, store)
+STEP_FUNCS = {
+    "ingest": ingest,
+    "analyze": analyze,
+    "export": export,
+}
 
-def _open(args):
-    cfg = Config.load(args.config)
+
+def _validate(cfg) -> list[str]:
+    steps = list(cfg.run.steps or [])
+    if not steps:
+        raise SystemExit("Nothing to do: 'run.steps' is empty in the config.")
+
+    unknown = [s for s in steps if s not in STEP_FUNCS]
+    if unknown:
+        raise SystemExit(
+            f"Unknown step(s) {unknown}. Valid steps: {sorted(STEP_FUNCS)}."
+        )
+
+    if "ingest" in steps:
+        src = getattr(cfg.run, "source", None)
+        if not src:
+            raise SystemExit("Step 'ingest' requires 'run.source' to be set.")
+        if not Path(src).exists():
+            raise SystemExit(f"Ingest source does not exist: {src}")
+
+    return steps
+
+
+def main():
+    cfg = Config.resolve()
+    steps = _validate(cfg)
+
     store = Store(cfg.path("db_path"))
-    return cfg, store
-
-
-def cmd_ingest(args):
-    cfg, store = _open(args)
     with store:
-        print(f"Ingesting from {args.source} ...")
-        res = ingest(args.source, cfg, store)
-        print(f"Done: {res['added']} added, {res['skipped']} already known.")
-
-
-def cmd_analyze(args):
-    cfg, store = _open(args)
-    with store:
-        print("Analyzing ...")
-        res = analyze(cfg, store)
-        print(f"Done: {res['recordings']} recordings, {res['events']} events.")
-
-
-def cmd_export(args):
-    cfg, store = _open(args)
-    with store:
-        print("Exporting ...")
-        export(cfg, store)
-
-
-def cmd_run(args):
-    cfg, store = _open(args)
-    with store:
-        print(f"[1/3] Ingesting from {args.source} ...")
-        res = ingest(args.source, cfg, store)
-        print(f"      {res['added']} added, {res['skipped']} already known.")
-        print("[2/3] Analyzing ...")
-        ares = analyze(cfg, store)
-        print(f"      {ares['recordings']} recordings, {ares['events']} events.")
-        print("[3/3] Exporting ...")
-        export(cfg, store)
-        print("All done.")
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="barkdetect",
-                                description="Analyze Zoom H6 MP3s for dog barking.")
-    p.add_argument("-c", "--config", default="config.yml", help="path to config.yml")
-    sub = p.add_subparsers(dest="command", required=True)
-
-    pi = sub.add_parser("ingest", help="copy + register new MP3s from the SD card")
-    pi.add_argument("--source", required=True, help="SD card path or folder, e.g. E:\\")
-    pi.set_defaults(func=cmd_ingest)
-
-    pa = sub.add_parser("analyze", help="detect barks in unprocessed recordings")
-    pa.set_defaults(func=cmd_analyze)
-
-    pe = sub.add_parser("export", help="regenerate results.json for the frontend")
-    pe.set_defaults(func=cmd_export)
-
-    pr = sub.add_parser("run", help="ingest + analyze + export in one go")
-    pr.add_argument("--source", required=True, help="SD card path or folder, e.g. E:\\")
-    pr.set_defaults(func=cmd_run)
-    return p
-
-
-def main(argv=None):
-    args = build_parser().parse_args(argv)
-    args.func(args)
+        for i, step in enumerate(steps, 1):
+            print(f"[{i}/{len(steps)}] {step} ...")
+            STEP_FUNCS[step](cfg, store)
+    print("All done.")
 
 
 if __name__ == "__main__":
