@@ -1,0 +1,48 @@
+# Bark Detector Offline — configuration
+# Paths are relative to the project root (or absolute).
+
+paths:
+  archive_dir: data/archive      # immutable copies of the original MP3s
+  snippets_dir: data/snippets    # per-event audio clips (served to the frontend)
+  db_path: data/barks.db         # SQLite source of truth
+  export_dir: data/export        # results JSON for the frontend
+
+# Timezone of the Zoom H6 recorder AND this PC. FAT timestamps on the SD card
+# are stored in local wall-clock time; this must match the recorder's clock.
+timezone: Europe/Berlin
+
+audio:
+  sample_rate: 32000             # PANNs native sample rate — do not change
+  window_seconds: 60             # streaming window size (keeps RAM flat on 24h files)
+  min_window_seconds: 1.0        # skip trailing windows shorter than this
+
+# Normalization is applied per window BEFORE detection, so quiet recordings are
+# boosted to a consistent level. A silence guard prevents amplifying pure noise.
+normalization:
+  enabled: true
+  target_peak: 0.9               # scale window so its peak reaches this (0..1)
+  max_gain: 20.0                 # cap amplification (linear) to avoid blowing up faint noise
+  noise_floor: 0.005             # if window peak < this, treat as silence and do NOT amplify
+
+detection:
+  threshold: 0.15                # frame score to count as "dog sound" (LOW = high recall)
+  min_event_seconds: 0.15        # discard events shorter than this
+  merge_gap_seconds: 0.4         # merge two hot spans separated by less than this
+  # AudioSet class names treated as dog barking. Must match PANNs label spelling.
+  dog_classes:
+    - Dog
+    - Bark
+    - Bow-wow
+    - Yip
+    - Howl
+    - Growling
+    - Whimper (dog)
+
+snippets:
+  padding_seconds: 2.0           # audio context added before/after each event
+  quality: 5                     # libmp3lame VBR quality (0=best/large .. 9=worst/small)
+
+coverage:
+  merge_gap_seconds: 5.0         # recordings within this gap are treated as contiguous
+  night_start_hour: 22           # local hour night window begins
+  night_end_hour: 6              # local hour night window ends

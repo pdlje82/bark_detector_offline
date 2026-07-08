@@ -1,0 +1,91 @@
+"""Export SQLite contents to JSON for the frontend. Always derived, never edited."""
+
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from .coverage import compute_coverage
+from .store import Store
+
+
+def _is_night(local_dt: datetime, night_start: int, night_end: int) -> bool:
+    h = local_dt.hour
+    if night_start <= night_end:
+        return night_start <= h < night_end
+    return h >= night_start or h < night_end  # window crosses midnight
+
+
+def build_export(cfg, store: Store) -> dict:
+    tz = ZoneInfo(cfg.timezone)
+    recordings = store.all_recordings()
+    events = store.all_events()
+
+    coverage, gaps = compute_coverage(recordings, cfg.coverage.merge_gap_seconds)
+
+    event_list = []
+    daily = defaultdict(lambda: {"count": 0, "total_bark_seconds": 0.0, "night_count": 0})
+    for e in events:
+        local_start = datetime.fromisoformat(e["abs_start_utc"]).astimezone(tz)
+        night = _is_night(local_start, cfg.coverage.night_start_hour,
+                          cfg.coverage.night_end_hour)
+        event_list.append({
+            "id": e["id"],
+            "recording": e["original_filename"],
+            "abs_start_utc": e["abs_start_utc"],
+            "abs_start_local": local_start.isoformat(),
+            "abs_end_utc": e["abs_end_utc"],
+            "duration_sec": e["duration_sec"],
+            "peak_conf": e["peak_conf"],
+            "mean_conf": e["mean_conf"],
+            "class": e["top_class"],
+            "night": night,
+            "snippet_url": f"snippets/{e['snippet_path']}" if e["snippet_path"] else None,
+        })
+        day = local_start.date().isoformat()
+        d = daily[day]
+        d["count"] += 1
+        d["total_bark_seconds"] += e["duration_sec"]
+        if night:
+            d["night_count"] += 1
+
+    daily_summary = [
+        {"date": day, **{k: round(v, 1) if isinstance(v, float) else v
+                         for k, v in vals.items()}}
+        for day, vals in sorted(daily.items())
+    ]
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "timezone": cfg.timezone,
+        "recording_count": len(recordings),
+        "event_count": len(event_list),
+        "recordings": [{
+            "original_filename": r["original_filename"],
+            "sha256": r["sha256"],
+            "start_utc": r["start_utc"],
+            "start_local": r["start_local"],
+            "duration_sec": r["duration_sec"],
+            "timestamp_source": r["timestamp_source"],
+            "processed_at": r["processed_at"],
+        } for r in recordings],
+        "coverage": coverage,
+        "gaps": gaps,
+        "daily_summary": daily_summary,
+        "events": event_list,
+    }
+
+
+def export(cfg, store: Store) -> Path:
+    data = build_export(cfg, store)
+    export_dir = cfg.path("export_dir")
+    export_dir.mkdir(parents=True, exist_ok=True)
+    out = export_dir / "results.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"  wrote {out}  ({data['event_count']} events, "
+          f"{len(data['gaps'])} gaps)")
+    return out

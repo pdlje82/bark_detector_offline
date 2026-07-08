@@ -1,0 +1,10 @@
+# Recorded audio, snippets, database and exports are data, not code.
+data/
+*.mp3
+*.wav
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
