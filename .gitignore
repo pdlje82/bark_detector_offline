@@ -6,5 +6,25 @@ data/
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache/
 .venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# JetBrains / PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+cmake-build-*/
+out/
+.idea_modules/
+atlassian-ide-plugin.xml
+com_crashlytics_export_strings.xml
+crashlytics.properties
+crashlytics-build.properties
+fabric.properties
