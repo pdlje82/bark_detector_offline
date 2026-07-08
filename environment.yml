@@ -8,7 +8,7 @@ dependencies:
   - libsndfile
   - numpy
   - librosa
-  - soundfile
+  - pysoundfile   # conda-forge name for the `soundfile` PyPI package
   - mutagen
   - pyyaml
   - tqdm
