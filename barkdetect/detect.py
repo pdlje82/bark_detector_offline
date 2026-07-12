@@ -16,7 +16,17 @@ def load_model(device: str = "cpu", checkpoint_path: str | None = None):
         from panns_inference import labels
     except ImportError:  # older/newer layouts
         from panns_inference.config import labels
-    model = SoundEventDetection(checkpoint_path=checkpoint_path, device=device)
+    try:
+        model = SoundEventDetection(checkpoint_path=checkpoint_path, device=device)
+    except (RuntimeError, EOFError) as e:
+        # A truncated/corrupt .pth (e.g. an interrupted download) surfaces here
+        # as an opaque torch error. Give an actionable message instead.
+        raise RuntimeError(
+            "Failed to load the PANNs checkpoint — it looks incomplete or "
+            "corrupt (common with an interrupted download). Delete the file at "
+            "~/panns_data/Cnn14_DecisionLevelMax.pth (or model.checkpoint_path) "
+            f"and re-download it fully, then retry. Original error: {e}"
+        ) from e
     return model, list(labels)
 
 
