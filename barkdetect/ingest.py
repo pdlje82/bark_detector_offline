@@ -40,10 +40,20 @@ def _iso_local(ts: float, tz: str) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ZoneInfo(tz)).isoformat()
 
 
-def find_recordings(source: str | Path, extensions) -> list[Path]:
+def find_recordings(source: str | Path, extensions, exclude_dir: Path | None = None
+                    ) -> list[Path]:
     exts = {e.lower() for e in extensions}
     source = Path(source)
-    return sorted(p for p in source.rglob("*") if p.suffix.lower() in exts)
+    exclude = exclude_dir.resolve() if exclude_dir else None
+
+    def is_excluded(p: Path) -> bool:
+        if exclude is None:
+            return False
+        rp = p.resolve()
+        return rp == exclude or exclude in rp.parents
+
+    return sorted(p for p in source.rglob("*")
+                  if p.suffix.lower() in exts and not is_excluded(p))
 
 
 def ingest(cfg, store: Store) -> dict:
@@ -54,7 +64,7 @@ def ingest(cfg, store: Store) -> dict:
     archive_dir.mkdir(parents=True, exist_ok=True)
 
     added, skipped = 0, 0
-    for src in find_recordings(source, ic.file_extensions):
+    for src in find_recordings(source, ic.file_extensions, exclude_dir=archive_dir):
         sha = sha256_file(src, ic.hash_chunk_bytes)
         if store.has_hash(sha):
             skipped += 1

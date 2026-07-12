@@ -44,10 +44,27 @@ class Config:
         self.logging = _to_ns(data["logging"])
         self._paths = data["paths"]
 
+    @property
+    def base_dir(self) -> Path:
+        """Base directory that relative data paths resolve against.
+
+        Defaults to the config file's directory (the repo). Set `paths.root`
+        to keep data (archive, db, snippets, export) outside the git checkout.
+        """
+        root = self._paths.get("root")
+        if root:
+            rp = Path(root)
+            return rp if rp.is_absolute() else (self.project_root / rp)
+        return self.project_root
+
+    def resolve_path(self, p: str | Path) -> Path:
+        """Resolve a path against base_dir (absolute paths pass through)."""
+        p = Path(p)
+        return p if p.is_absolute() else (self.base_dir / p)
+
     def path(self, key: str) -> Path:
-        """Resolve a configured path relative to the project root."""
-        p = Path(self._paths[key])
-        return p if p.is_absolute() else (self.project_root / p)
+        """Resolve a configured data path against base_dir."""
+        return self.resolve_path(self._paths[key])
 
     def params_snapshot(self) -> dict:
         """The parameters that materially affect detection results.
@@ -66,6 +83,11 @@ class Config:
             "audio": {
                 "sample_rate": self.audio.sample_rate,
                 "window_seconds": self.audio.window_seconds,
+            },
+            "snippets": {
+                # documents whether listening clips were loudness-boosted
+                "normalized": getattr(self.snippets, "normalize", False),
+                "target_lufs": getattr(self.snippets, "normalize_target_lufs", None),
             },
         }
 
@@ -100,9 +122,7 @@ def setup_logging(cfg: Config) -> None:
 
     log_file = getattr(cfg.logging, "log_file", None)
     if log_file:
-        path = Path(log_file)
-        if not path.is_absolute():
-            path = cfg.project_root / path
+        path = cfg.resolve_path(log_file)
         path.parent.mkdir(parents=True, exist_ok=True)
         fh = logging.FileHandler(path, encoding="utf-8")   # append across runs
         fh.setFormatter(fmt)

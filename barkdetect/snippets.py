@@ -18,6 +18,10 @@ def extract_snippet(source_mp3: str | Path, snippets_dir: Path, rel_path: str,
 
     Returns rel_path. Uses input seeking (`-ss` before `-i`) so seeking into a
     24h file is fast; accuracy is well within the padding we add.
+
+    The archived original is never modified. If snippets.normalize is set, the
+    clip's loudness is normalized (ffmpeg loudnorm) so faint barks are audible;
+    this treatment is recorded in results.json provenance.
     """
     sc = cfg.snippets
     ss = max(0.0, start_sec - sc.padding_seconds)
@@ -26,7 +30,9 @@ def extract_snippet(source_mp3: str | Path, snippets_dir: Path, rel_path: str,
     out.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["ffmpeg", "-v", "error", "-y",
            "-ss", f"{ss:.3f}", "-i", str(source_mp3), "-t", f"{dur:.3f}",
-           "-ac", str(sc.channels), "-c:a", sc.codec, "-q:a", str(sc.quality),
-           str(out)]
+           "-ac", str(sc.channels)]
+    if getattr(sc, "normalize", False):
+        cmd += ["-af", f"loudnorm=I={sc.normalize_target_lufs}:TP=-1.5:LRA=11"]
+    cmd += ["-c:a", sc.codec, "-q:a", str(sc.quality), str(out)]
     subprocess.run(cmd, check=True)
     return rel_path

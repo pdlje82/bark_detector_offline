@@ -14,6 +14,10 @@ run:
     - export
 
 paths:
+  # Base dir that the relative paths below resolve against. Set this to your
+  # project/data directory so archive/db/snippets/export live OUTSIDE the git
+  # repo. null/empty = use the repo dir (where config.yml lives).
+  root: "D:/Projects/dog_bark"
   archive_dir: data/archive   # immutable copies of the original MP3s
   snippets_dir: data/snippets # per-event audio clips (served to the frontend)
   db_path: data/barks.db      # SQLite source of truth
@@ -69,6 +73,11 @@ snippets:
   codec: libmp3lame           # ffmpeg audio codec for the clip
   channels: 1                 # snippet channel count
   extension: mp3              # snippet file extension
+  # Loudness-normalize clips (ffmpeg loudnorm) so faint barks in quiet recordings
+  # are audible on review. The archived original is never modified; this only
+  # affects the listening clips. Recorded in results.json provenance.
+  normalize: true
+  normalize_target_lufs: -16.0  # EBU R128 integrated loudness target (higher = louder)
 
 coverage:
   merge_gap_seconds: 5.0      # recordings within this gap are treated as contiguous

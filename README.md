@@ -58,8 +58,11 @@ continuous, a bark straddling a window boundary is still detected as one event.
 
 **5. Absolute timing, snippets, provenance.** Event offsets are added to the
 recording's start time to get absolute UTC/local timestamps. A padded MP3 clip is
-cut per event for later listening, and the exact parameter set used is stored with
-the recording (see `parameters` in `results.json`) so results are reproducible.
+cut per event for later listening — by default its loudness is normalized
+(`snippets.normalize`) so faint barks in quiet recordings are audible, while the
+archived original is left untouched. The exact parameter set used (including
+whether clips were loudness-boosted) is stored with the recording (see
+`parameters` in `results.json`) so results are reproducible.
 
 Latency scales with audio length, not file count. Tuning knobs: raise
 `window_seconds` to reduce per-call overhead, or (not yet wired) increase
@@ -161,9 +164,14 @@ root unless absolute. 🔧 marks the settings you are most likely to tune;
 
 ### `paths` — where data lives
 
+The four data paths below are resolved against `root`; absolute values are used
+as-is. Set `root` to your project/data directory to keep data **out of the git
+repo**.
+
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `archive_dir` | `data/archive` | Immutable copies of the original MP3s. |
+| `root` 🔧 | `D:/Projects/dog_bark` | Base dir the paths below resolve against. `null`/empty = the repo dir (where `config.yml` lives). |
+| `archive_dir` | `data/archive` | Immutable copies of the original MP3s. Auto-excluded from ingest scans even if it lives inside `run.source`. |
 | `snippets_dir` | `data/snippets` | Per-event audio clips (served to the frontend). |
 | `db_path` | `data/barks.db` | SQLite source of truth. |
 | `export_dir` | `data/export` | Where `results.json` is written. |
@@ -228,6 +236,8 @@ root unless absolute. 🔧 marks the settings you are most likely to tune;
 | `codec` | `libmp3lame` | ffmpeg audio codec for the clip. |
 | `channels` | `1` | Snippet channel count (mono). |
 | `extension` | `mp3` | Clip file extension. |
+| `normalize` 🔧 | `true` | Loudness-normalize clips so faint barks are audible on review. Only affects the listening clips — the archived original is never modified. Recorded in `results.json` provenance. |
+| `normalize_target_lufs` 🔧 | `-16.0` | EBU R128 integrated loudness target for `loudnorm` (higher = louder). |
 
 ### `coverage` — timeline & gaps
 
