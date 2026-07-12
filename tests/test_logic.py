@@ -77,6 +77,18 @@ def test_merge_close_events_and_drop_short():
     assert len(events) == 1         # two merged, short one dropped
 
 
+def test_snippet_name_template():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from barkdetect.snippets import snippet_relpath
+    cfg = SimpleNamespace(snippets=SimpleNamespace(
+        name_template="{date}_{time}_{ms}_{dbfs}", extension="mp3"))
+    dt = datetime(2026, 7, 12, 17, 5, 2, tzinfo=ZoneInfo("Europe/Berlin"))
+    rel = snippet_relpath(cfg, "9ab6bed4511d0000", dt, 33.274, 0.0342)
+    # <hash>/ddmmyy_hhmmss_ms_dbfs.mp3 ; 20*log10(0.0342) ~ -29 dBFS
+    assert rel == "9ab6bed4511d/120726_170502_000033274_-29dBFS.mp3"
+
+
 def test_frame_energy_rms_and_peak():
     from barkdetect.detect import _frame_energy
     raw = np.array([0.0, 0.0, 1.0, -1.0, 0.5, 0.5, 0.0, 0.0], dtype=np.float32)

@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 
-def snippet_relpath(sha256: str, offset_start_sec: float, extension: str) -> str:
-    """Deterministic relative path (under snippets_dir) for an event clip."""
+def _fmt_dbfs(intensity_raw: float | None) -> str:
+    """Format a linear amplitude (0..1) as an integer-dBFS token, floored at -120."""
+    dbfs = round(20 * math.log10(intensity_raw)) if intensity_raw and intensity_raw > 0 else -120
+    return f"{int(dbfs)}dBFS"
+
+
+def snippet_relpath(cfg, sha256: str, event_local: datetime,
+                    offset_start_sec: float, intensity_raw: float | None) -> str:
+    """Relative path (under snippets_dir) for an event clip.
+
+    The filename is built from cfg.snippets.name_template. Available tokens:
+      {date}  event date, ddmmyy       {ms}    offset within recording, 9-digit ms
+      {time}  event time, hhmmss        {dbfs}  loudness, e.g. "-29dBFS"
+      {intensity} linear amplitude (dot->'p')   {hash}  short sha
+    Clips stay under a per-recording "<hash>/" folder, and {ms} keeps names
+    unique even when several barks fall in the same second.
+    """
     ms = int(round(offset_start_sec * 1000))
-    return f"{sha256[:12]}/evt_{ms:09d}.{extension}"
+    tokens = {
+        "date": event_local.strftime("%d%m%y"),
+        "time": event_local.strftime("%H%M%S"),
+        "ms": f"{ms:09d}",
+        "dbfs": _fmt_dbfs(intensity_raw),
+        "intensity": f"{(intensity_raw or 0.0):.4f}".replace(".", "p"),
+        "hash": sha256[:12],
+    }
+    stem = cfg.snippets.name_template.format(**tokens)
+    return f"{sha256[:12]}/{stem}.{cfg.snippets.extension}"
 
 
 def extract_snippet(source_mp3: str | Path, snippets_dir: Path, rel_path: str,

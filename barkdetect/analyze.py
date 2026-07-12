@@ -78,8 +78,9 @@ def analyze(cfg, store: Store) -> dict:
         t = perf_counter()
         store.clear_events(rec["id"])          # idempotent re-analysis
         for ev in events:
-            rel = snippet_relpath(rec["sha256"], ev["offset_start_sec"],
-                                  cfg.snippets.extension)
+            event_local = start_local + timedelta(seconds=ev["offset_start_sec"])
+            rel = snippet_relpath(cfg, rec["sha256"], event_local,
+                                  ev["offset_start_sec"], ev["intensity_raw"])
             extract_snippet(rec["archived_path"], snippets_dir, rel,
                             ev["offset_start_sec"], ev["duration_sec"], cfg)
             store.add_event({

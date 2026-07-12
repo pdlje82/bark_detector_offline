@@ -314,6 +314,7 @@ derived, with `1.0` = the loudest bark in scope. Each event also carries
 | `codec` | `libmp3lame` | ffmpeg audio codec for the clip. |
 | `channels` | `1` | Snippet channel count (mono). |
 | `extension` | `mp3` | Clip file extension. |
+| `name_template` 🔧 | `{date}_{time}_{ms}_{dbfs}` | Clip filename (under a per-recording `<hash>/` folder). Tokens: `{date}`=ddmmyy, `{time}`=hhmmss (bark's local time), `{ms}`=offset in file (keeps names unique), `{dbfs}`=loudness, `{intensity}`=linear amplitude, `{hash}`. |
 | `normalize` 🔧 | `true` | Loudness-normalize clips so faint barks are audible on review. Only affects the listening clips — the archived original is never modified. Recorded in `results.json` provenance. |
 | `normalize_target_lufs` 🔧 | `-16.0` | EBU R128 integrated loudness target for `loudnorm` (higher = louder). |
 

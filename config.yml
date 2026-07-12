@@ -86,6 +86,10 @@ snippets:
   codec: libmp3lame           # ffmpeg audio codec for the clip
   channels: 1                 # snippet channel count
   extension: mp3              # snippet file extension
+  # Clip filename (kept under a per-recording <hash>/ folder). Tokens:
+  # {date}=ddmmyy, {time}=hhmmss (bark's local time), {ms}=offset in file (unique),
+  # {dbfs}=loudness e.g. -29dBFS, {intensity}=linear amp, {hash}=short sha.
+  name_template: "{date}_{time}_{ms}_{dbfs}"
   # Loudness-normalize clips (ffmpeg loudnorm) so faint barks in quiet recordings
   # are audible on review. The archived original is never modified; this only
   # affects the listening clips. Recorded in results.json provenance.
