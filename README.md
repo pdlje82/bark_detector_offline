@@ -145,6 +145,112 @@ settings used — recorded for reproducibility), `recordings`, `coverage`, `gaps
 produced its events. Serve `data/export/` and `data/snippets/` as static files
 to the frontend.
 
+## Configuration reference (`config.yml`)
+
+Everything is set in `config.yml` — the pipeline takes no CLI arguments. Below is
+every parameter, its default, and what it does. Paths are relative to the project
+root unless absolute. 🔧 marks the settings you are most likely to tune;
+⚠️ marks settings you should normally leave alone.
+
+### `run` — what runs
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `source` 🔧 | `E:/DCIM` | Folder/SD-card path to ingest from. Used only by the `ingest` step. Point it at the card itself (timestamps live there). |
+| `steps` 🔧 | `[ingest, analyze, export]` | Which stages run, in order. E.g. `[export]` to only rebuild JSON, `[analyze, export]` to re-run detection without re-copying. |
+
+### `paths` — where data lives
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `archive_dir` | `data/archive` | Immutable copies of the original MP3s. |
+| `snippets_dir` | `data/snippets` | Per-event audio clips (served to the frontend). |
+| `db_path` | `data/barks.db` | SQLite source of truth. |
+| `export_dir` | `data/export` | Where `results.json` is written. |
+
+### `timezone`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `timezone` 🔧 | `Europe/Berlin` | IANA zone of the recorder **and** this PC. Must match the H6's clock — used to turn SD-card FAT timestamps into correct local/UTC times. |
+
+### `model` — the detector
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `device` 🔧 | `cpu` | `cpu` or `cuda` (needs a CUDA-enabled PyTorch + GPU). |
+| `name` | `PANNs Cnn14_DecisionLevelMax` | Label stored with results; not a switch to another model. |
+| `version` | `audioset` | Label stored with results for provenance. |
+| `checkpoint_path` | `null` | `null` = use PANNs' default location (`~/panns_data/...`). Set an explicit path to pin the checkpoint file. |
+
+### `audio` — decoding & windowing
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `sample_rate` ⚠️ | `32000` | PANNs' required input rate. Do **not** change — other values break detection quality. |
+| `window_seconds` 🔧 | `60` | Streaming window size. Larger = fewer model calls (slightly faster) but more RAM per window. |
+| `min_window_seconds` | `1.0` | Trailing windows shorter than this are skipped (too short for the model). |
+
+### `normalization` — pre-detection gain (applied per window)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` 🔧 | `true` | Turn normalization on/off. Off = raw levels (useful to prove detections don't depend on boosting). |
+| `target_peak` 🔧 | `0.9` | Windows are scaled so their peak reaches this (0–1). |
+| `max_gain` 🔧 | `20.0` | Ceiling on amplification (linear). Prevents over-boosting faint windows. |
+| `noise_floor` 🔧 | `0.005` | If a window's peak is below this it's treated as silence and left untouched (stops noise being amplified into false positives). |
+
+### `detection` — bark events
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `threshold` 🔧 | `0.15` | Frame score to count as a dog sound. **Lower = higher recall** (more, but noisier). Raise for higher precision. |
+| `min_event_seconds` 🔧 | `0.15` | Discard events shorter than this. |
+| `merge_gap_seconds` 🔧 | `0.4` | Merge two hot spans separated by less than this into one event. |
+| `dog_classes` 🔧 | `Dog, Bark, Bow-wow, Yip, Howl, Growling, Whimper (dog)` | AudioSet class names counted as barking. Names must match PANNs spelling exactly. |
+
+### `ingest` — copy & identity
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `file_extensions` | `[".mp3"]` | Which files to pick up from `source`. |
+| `timestamp_source_label` | `sdcard_ctime` | Recorded with each file to document how its start time was derived. |
+| `hash_prefix_len` | `12` | Length of the SHA-256 prefix used in archive filenames. |
+| `archive_name_template` | `{hash}_{name}` | Archive filename pattern; `{hash}`=short sha, `{name}`=original name. |
+| `hash_chunk_bytes` | `1048576` | Read block size when hashing (memory/speed tradeoff). |
+
+### `snippets` — per-event clips
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `padding_seconds` 🔧 | `2.0` | Audio context added before **and** after each event. |
+| `quality` | `5` | `libmp3lame` VBR quality (0 = best/large … 9 = worst/small). |
+| `codec` | `libmp3lame` | ffmpeg audio codec for the clip. |
+| `channels` | `1` | Snippet channel count (mono). |
+| `extension` | `mp3` | Clip file extension. |
+
+### `coverage` — timeline & gaps
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `merge_gap_seconds` 🔧 | `5.0` | Recordings within this gap are treated as contiguous (so H6 file-splits don't look like gaps). |
+| `night_start_hour` 🔧 | `22` | Local hour the "night" window begins (for night bark counts). |
+| `night_end_hour` 🔧 | `6` | Local hour the night window ends. |
+
+### `export`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `filename` | `results.json` | Output file written into `export_dir`. |
+
+### `logging`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `level` 🔧 | `INFO` | `DEBUG` \| `INFO` \| `WARNING`. `DEBUG` adds a per-window position line. |
+| `progress_bar` 🔧 | `true` | Live tqdm bar per file. Set `false` for headless/cron/redirected runs. |
+| `log_file` | `data/processing.log` | Appended, timestamped audit trail. `null` = console only. |
+
 ## Tests
 
 Pure logic (no ffmpeg/model needed):
