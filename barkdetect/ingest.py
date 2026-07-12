@@ -36,8 +36,8 @@ def _iso_utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
-def _iso_local(ts: float, tz: str) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ZoneInfo(tz)).isoformat()
+def _local_dt(ts: float, tz: str) -> datetime:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ZoneInfo(tz))
 
 
 def find_recordings(source: str | Path, extensions, exclude_dir: Path | None = None
@@ -73,7 +73,9 @@ def ingest(cfg, store: Store) -> dict:
         st = os.stat(src)                      # read timestamps from the CARD
         dur = ffprobe_duration(src)
 
+        start_local = _local_dt(st.st_ctime, cfg.timezone)
         dest_name = ic.archive_name_template.format(
+            start=start_local.strftime("%y%m%d_%H%M"),
             hash=sha[:ic.hash_prefix_len], name=src.name)
         dest = archive_dir / dest_name
         shutil.copy2(src, dest)                # copy2 preserves mtime
@@ -86,15 +88,15 @@ def ingest(cfg, store: Store) -> dict:
             "duration_sec": dur,
             "sample_rate": cfg.audio.sample_rate,
             "start_utc": _iso_utc(st.st_ctime),
-            "start_local": _iso_local(st.st_ctime, cfg.timezone),
+            "start_local": start_local.isoformat(),
             "timezone": cfg.timezone,
             "timestamp_source": ic.timestamp_source_label,
             "mtime_utc": _iso_utc(st.st_mtime),
             "ingested_at": datetime.now(timezone.utc).isoformat(),
         })
         added += 1
-        log.info("  ingested %s  (%.2fh)  start=%s",
-                 src.name, dur / 3600, _iso_local(st.st_ctime, cfg.timezone))
+        log.info("  ingested %s -> %s  (%.2fh)  start=%s",
+                 src.name, dest_name, dur / 3600, start_local.isoformat())
 
     log.info("  %d added, %d already known.", added, skipped)
     return {"added": added, "skipped": skipped}

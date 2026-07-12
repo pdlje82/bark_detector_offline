@@ -224,7 +224,7 @@ repo**.
 | `file_extensions` | `[".mp3"]` | Which files to pick up from `source`. |
 | `timestamp_source_label` | `sdcard_ctime` | Recorded with each file to document how its start time was derived. |
 | `hash_prefix_len` | `12` | Length of the SHA-256 prefix used in archive filenames. |
-| `archive_name_template` | `{hash}_{name}` | Archive filename pattern; `{hash}`=short sha, `{name}`=original name. |
+| `archive_name_template` | `{start}_{hash}_{name}` | Archive filename pattern. Tokens: `{start}`=recording start (local, `yymmdd_hhmm`), `{hash}`=short sha, `{name}`=original name. |
 | `hash_chunk_bytes` | `1048576` | Read block size when hashing (memory/speed tradeoff). |
 
 ### `snippets` — per-event clips
