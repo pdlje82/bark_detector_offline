@@ -27,6 +27,7 @@ STEP_FUNCS = {
 
 
 def _validate(cfg) -> list[str]:
+    """Validate run.steps and (for ingest) run.source; return the step list or exit."""
     steps = list(cfg.run.steps or [])
     if not steps:
         raise SystemExit("Nothing to do: 'run.steps' is empty in the config.")
@@ -48,6 +49,7 @@ def _validate(cfg) -> list[str]:
 
 
 def main():
+    """Load config, set up logging, and run the configured steps in order."""
     cfg = Config.resolve()
     setup_logging(cfg)
     steps = _validate(cfg)

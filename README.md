@@ -72,6 +72,59 @@ Latency scales with audio length, not file count. Tuning knobs: raise
 `window_seconds` to reduce per-call overhead, or (not yet wired) increase
 `torch` CPU threads.
 
+### Where each per-event feature is computed
+
+Detection and feature calculation happen across three layers. Raw facts are
+produced at detection time, absolute/persisted facts at analyze time, and
+derived/presentational facts at export time (so they can be recomputed without
+re-running the model).
+
+```text
+  archived MP3
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ score_recording()                                        detect.py    │
+│                                                                       │
+│  stream_windows() ──▶ per 60s window: raw float32 samples             │
+│                                   │                                   │
+│                     ┌─────────────┴──────────────┐                    │
+│                     ▼                             ▼                    │
+│            normalize_window()             _frame_energy(raw)          │
+│            (for detection only)           rms│peak per frame          │
+│                     ▼                             ▼                    │
+│            model.inference()                                          │
+│                     ▼                             ▼                    │
+│        ══ dog-class score timeline ══     ══ loudness timeline ══      │
+└───────────────────────┬─────────────────────────┬────────────────────┘
+                        ▼                          ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ extract_events()   threshold ▸ merge ▸ min-duration    detect.py      │
+│                                                                       │
+│  one event per surviving run, features:                               │
+│    offset_start_sec, offset_end_sec, duration_sec  ◀ timeline         │
+│    peak_conf, mean_conf, top_class                 ◀ scores           │
+│    intensity_raw                                   ◀ loudness         │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ analyze()                                                analyze.py    │
+│    + abs_start_utc / abs_end_utc   (recording start + offset)         │
+│    + snippet clip (ffmpeg)  ▸ snippet_path                            │
+│    ▸ persist event row to SQLite                                      │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ build_export()                                           export.py     │
+│    + abs_start_local, night                                           │
+│    + intensity_relative (0..1), intensity_dbfs   (from intensity_raw) │
+│    + snippet_url                                                      │
+│    aggregates: daily_summary, coverage, gaps   [future: hourly heatmap]│
+└─────────────────────────────────────────────────────────────────────┘
+                                ▼
+                         results.json
+```
+
 ### Logging & progress
 
 Analysis logs each stage and its timing, plus a **realtime factor** (audio time
@@ -248,6 +301,7 @@ derived, with `1.0` = the loudest bark in scope. Each event also carries
 | `hash_prefix_len` | `12` | Length of the SHA-256 prefix used in archive filenames. |
 | `archive_name_template` | `{start}_{hash}_{name}` | Archive filename pattern. Tokens: `{start}`=recording start (local, `yymmdd_hhmm`), `{hash}`=short sha, `{name}`=original name. |
 | `hash_chunk_bytes` | `1048576` | Read block size when hashing (memory/speed tradeoff). |
+| `clock_drift_warn_seconds` 🔧 | `120` | Warn if file mtime disagrees with `start + duration` by more than this — flags a bad recorder clock or timestamps lost on copy. |
 
 ### `snippets` — per-event clips
 

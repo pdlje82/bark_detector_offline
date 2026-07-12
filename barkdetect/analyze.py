@@ -23,11 +23,16 @@ log = logging.getLogger(__name__)
 
 
 def _abs_iso(start_utc_iso: str, offset_sec: float) -> str:
+    """Return the ISO-8601 UTC time `offset_sec` after a recording's start."""
     base = datetime.fromisoformat(start_utc_iso)
     return (base + timedelta(seconds=offset_sec)).isoformat()
 
 
 def analyze(cfg, store: Store) -> dict:
+    """Detect barks in all unprocessed recordings; persist events, snippets, provenance.
+
+    Returns a summary dict with the number of recordings and events processed.
+    """
     recs = store.unprocessed_recordings()
     if not recs:
         log.info("  no unprocessed recordings")
@@ -41,7 +46,7 @@ def analyze(cfg, store: Store) -> dict:
     dog_names = list(cfg.detection.dog_classes)
     snippets_dir = cfg.path("snippets_dir")
     params_json = json.dumps(cfg.params_snapshot(), ensure_ascii=False)
-    log.info("  model ready in %.1fs — %d recordings to process",
+    log.info("  model ready in %.1fs - %d recordings to process",
              perf_counter() - t_load, len(recs))
 
     total_events = 0
@@ -49,8 +54,16 @@ def analyze(cfg, store: Store) -> dict:
     run_start = perf_counter()
     for n, rec in enumerate(recs, 1):
         dur = rec["duration_sec"]
-        log.info("[%d/%d] %s (%s) — starting", n, len(recs),
-                 rec["original_filename"], _fmt_hms(dur))
+        start_local = datetime.fromisoformat(rec["start_local"])
+        end_local = start_local + timedelta(seconds=dur)
+        # show end date too when the recording crosses midnight
+        end_fmt = (end_local.strftime("%Y-%m-%d %H:%M:%S")
+                   if end_local.date() != start_local.date()
+                   else end_local.strftime("%H:%M:%S"))
+        log.info("[%d/%d] %s - recorded %s -> %s  (dur %s)  [tz %s, src %s]",
+                 n, len(recs), rec["original_filename"],
+                 start_local.strftime("%a %Y-%m-%d %H:%M:%S"), end_fmt,
+                 _fmt_hms(dur), rec["timezone"], rec["timestamp_source"])
         file_start = perf_counter()
 
         # --- detection (the slow phase) ---
@@ -94,7 +107,7 @@ def analyze(cfg, store: Store) -> dict:
         rtf = dur / elapsed if elapsed > 0 else float("nan")
         total_events += len(events)
         total_audio += dur
-        log.info("[%d/%d] %s done — %d events in %s  (%.1fx realtime)",
+        log.info("[%d/%d] %s done - %d events in %s  (%.1fx realtime)",
                  n, len(recs), rec["original_filename"], len(events),
                  _fmt_hms(elapsed), rtf)
 

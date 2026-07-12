@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 
 def _fmt_hms(seconds: float) -> str:
+    """Format a number of seconds as HH:MM:SS."""
     seconds = int(seconds)
     return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
 

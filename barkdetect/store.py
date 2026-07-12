@@ -47,7 +47,14 @@ CREATE INDEX IF NOT EXISTS idx_events_absstart  ON bark_events(abs_start_utc);
 
 
 class Store:
+    """Thin SQLite wrapper for recordings and their bark events.
+
+    Opens (creating if needed) the database at `db_path`, ensures the schema
+    exists, and exposes small query/insert helpers. Usable as a context manager.
+    """
+
     def __init__(self, db_path: str | Path):
+        """Open/create the DB at `db_path` and ensure the schema is present."""
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(db_path))
@@ -57,20 +64,25 @@ class Store:
         self.conn.commit()
 
     def close(self):
+        """Close the database connection."""
         self.conn.close()
 
     def __enter__(self):
+        """Enter the context manager, returning this Store."""
         return self
 
     def __exit__(self, *exc):
+        """Close the connection on context-manager exit."""
         self.close()
 
     # --- recordings ------------------------------------------------------
     def has_hash(self, sha256: str) -> bool:
+        """Return True if a recording with this SHA-256 is already stored."""
         cur = self.conn.execute("SELECT 1 FROM recordings WHERE sha256 = ?", (sha256,))
         return cur.fetchone() is not None
 
     def add_recording(self, rec: dict) -> int:
+        """Insert a recording row from a column->value dict; return its id."""
         cols = ", ".join(rec.keys())
         placeholders = ", ".join("?" for _ in rec)
         cur = self.conn.execute(
@@ -81,17 +93,20 @@ class Store:
         return cur.lastrowid
 
     def unprocessed_recordings(self) -> list[sqlite3.Row]:
+        """Return recordings not yet analyzed (processed_at IS NULL), time-ordered."""
         cur = self.conn.execute(
             "SELECT * FROM recordings WHERE processed_at IS NULL ORDER BY start_utc"
         )
         return cur.fetchall()
 
     def all_recordings(self) -> list[sqlite3.Row]:
+        """Return all recordings ordered by recording start time."""
         cur = self.conn.execute("SELECT * FROM recordings ORDER BY start_utc")
         return cur.fetchall()
 
     def mark_processed(self, recording_id: int, processed_at: str,
                        model_name: str, model_version: str, parameters_json: str):
+        """Record that a recording was analyzed, storing model + parameter provenance."""
         self.conn.execute(
             "UPDATE recordings SET processed_at=?, model_name=?, model_version=?, "
             "parameters_json=? WHERE id=?",
@@ -101,9 +116,14 @@ class Store:
 
     # --- events ----------------------------------------------------------
     def clear_events(self, recording_id: int):
+        """Delete all events for a recording (idempotent re-analysis)."""
         self.conn.execute("DELETE FROM bark_events WHERE recording_id=?", (recording_id,))
 
     def add_event(self, ev: dict) -> int:
+        """Insert a bark-event row from a column->value dict; return its id.
+
+        Not committed here — call commit() after a batch.
+        """
         cols = ", ".join(ev.keys())
         placeholders = ", ".join("?" for _ in ev)
         cur = self.conn.execute(
@@ -113,9 +133,11 @@ class Store:
         return cur.lastrowid
 
     def commit(self):
+        """Commit the current transaction."""
         self.conn.commit()
 
     def all_events(self) -> list[sqlite3.Row]:
+        """Return all events joined with their recording's filename + hash, time-ordered."""
         cur = self.conn.execute(
             """SELECT e.*, r.original_filename, r.sha256
                FROM bark_events e JOIN recordings r ON r.id = e.recording_id

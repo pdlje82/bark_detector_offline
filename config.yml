@@ -75,6 +75,10 @@ ingest:
   # {hash}=short sha, {name}=original filename.
   archive_name_template: "{start}_{hash}_{name}"
   hash_chunk_bytes: 1048576              # read size when hashing files
+  # Warn if the file's modified time disagrees with (start + duration) by more
+  # than this many seconds — flags a wrong recorder clock or timestamps lost on
+  # copy, which would undermine every timestamp in the evidence.
+  clock_drift_warn_seconds: 120
 
 snippets:
   padding_seconds: 2.0        # audio context added before/after each event

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 
 def _parse(iso: str) -> datetime:
+    """Parse an ISO-8601 string into a datetime."""
     return datetime.fromisoformat(iso)
 
 

@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 
 def sha256_file(path: str | Path, chunk: int) -> str:
+    """Return the SHA-256 hex digest of a file, read in `chunk`-byte blocks."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(chunk), b""):
@@ -33,20 +34,28 @@ def sha256_file(path: str | Path, chunk: int) -> str:
 
 
 def _iso_utc(ts: float) -> str:
+    """Format an epoch timestamp as an ISO-8601 UTC string."""
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 def _local_dt(ts: float, tz: str) -> datetime:
+    """Convert an epoch timestamp to a timezone-aware datetime in `tz`."""
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ZoneInfo(tz))
 
 
 def find_recordings(source: str | Path, extensions, exclude_dir: Path | None = None
                     ) -> list[Path]:
+    """Recursively find recordings under `source` matching `extensions`.
+
+    Files under `exclude_dir` (e.g. the archive) are skipped so the archive is
+    never rescanned when it lives inside the source.
+    """
     exts = {e.lower() for e in extensions}
     source = Path(source)
     exclude = exclude_dir.resolve() if exclude_dir else None
 
     def is_excluded(p: Path) -> bool:
+        """True if `p` is the excluded dir or lives inside it."""
         if exclude is None:
             return False
         rp = p.resolve()
@@ -72,6 +81,19 @@ def ingest(cfg, store: Store) -> dict:
 
         st = os.stat(src)                      # read timestamps from the CARD
         dur = ffprobe_duration(src)
+
+        # Integrity check: the file's modified time should be ~ start + duration.
+        # A large drift means a wrong recorder clock or timestamps lost on copy.
+        drift = st.st_mtime - (st.st_ctime + dur)
+        if abs(drift) > ic.clock_drift_warn_seconds:
+            log.warning(
+                "  %s: clock-drift %+.0fs — file mtime %s vs expected end %s "
+                "(start %s + dur %.0fs). Verify the recorder clock / that "
+                "timestamps were preserved.",
+                src.name, drift,
+                _local_dt(st.st_mtime, cfg.timezone).isoformat(),
+                _local_dt(st.st_ctime + dur, cfg.timezone).isoformat(),
+                _local_dt(st.st_ctime, cfg.timezone).isoformat(), dur)
 
         start_local = _local_dt(st.st_ctime, cfg.timezone)
         dest_name = ic.archive_name_template.format(

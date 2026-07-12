@@ -22,6 +22,7 @@ def _dbfs(raw: float) -> float:
 
 
 def _is_night(local_dt: datetime, night_start: int, night_end: int) -> bool:
+    """Return True if `local_dt`'s hour falls in the night window (may cross midnight)."""
     h = local_dt.hour
     if night_start <= night_end:
         return night_start <= h < night_end
@@ -29,6 +30,7 @@ def _is_night(local_dt: datetime, night_start: int, night_end: int) -> bool:
 
 
 def build_export(cfg, store: Store) -> dict:
+    """Build the full results dict (events, coverage, gaps, summaries, provenance)."""
     tz = ZoneInfo(cfg.timezone)
     recordings = store.all_recordings()
     events = store.all_events()
@@ -110,6 +112,7 @@ def build_export(cfg, store: Store) -> dict:
 
 
 def export(cfg, store: Store) -> Path:
+    """Write the results JSON into the export dir and return its path."""
     data = build_export(cfg, store)
     export_dir = cfg.path("export_dir")
     export_dir.mkdir(parents=True, exist_ok=True)

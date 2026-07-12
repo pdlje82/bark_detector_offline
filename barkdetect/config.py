@@ -28,7 +28,15 @@ def _to_ns(obj):
 
 
 class Config:
+    """Parsed configuration, exposing each config.yml section as attributes.
+
+    Sections are available as nested attribute objects (e.g. `cfg.detection.threshold`);
+    `path()`/`resolve_path()` resolve data paths and `params_snapshot()` captures the
+    result-affecting settings for provenance.
+    """
+
     def __init__(self, data: dict, project_root: Path):
+        """Build a Config from a parsed YAML dict rooted at `project_root`."""
         self._raw = data
         self.project_root = project_root
         self.timezone = data["timezone"]
@@ -98,6 +106,7 @@ class Config:
 
     @classmethod
     def load(cls, config_path: str | Path = DEFAULT_CONFIG) -> "Config":
+        """Load and parse a config.yml from an explicit path."""
         config_path = Path(config_path).resolve()
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
