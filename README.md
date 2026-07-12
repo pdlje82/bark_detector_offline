@@ -224,12 +224,14 @@ root unless absolute. 🔧 marks the settings you are most likely to tune;
 
 The four data paths below are resolved against `root`; absolute values are used
 as-is. Set `root` to your project/data directory to keep data **out of the git
-repo**.
+repo**. The `archive`, `snippets`, and `export` dirs are auto-excluded from
+ingest scans, so the pipeline never re-ingests its own output even when those
+dirs live inside `run.source`.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `root` 🔧 | `D:/Projects/dog_bark` | Base dir the paths below resolve against. `null`/empty = the repo dir (where `config.yml` lives). |
-| `archive_dir` | `data/archive` | Immutable copies of the original MP3s. Auto-excluded from ingest scans even if it lives inside `run.source`. |
+| `archive_dir` | `data/archive` | Immutable copies of the original MP3s. |
 | `snippets_dir` | `data/snippets` | Per-event audio clips (served to the frontend). |
 | `db_path` | `data/barks.db` | SQLite source of truth. |
 | `export_dir` | `data/export` | Where `results.json` is written. |

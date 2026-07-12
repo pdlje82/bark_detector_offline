@@ -7,7 +7,7 @@
 # Paths are relative to the project root (or absolute).
 
 run:
-  source: "D:/Projects/dog_bark"           # SD card path/folder to ingest MP3s from (used by 'ingest')
+  source: "D:/Projects/dog_bark/temp_input"           # SD card path/folder to ingest MP3s from (used by 'ingest')
   steps:                      # stages to execute, in this order
     - ingest
     - analyze

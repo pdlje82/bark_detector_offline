@@ -43,23 +43,21 @@ def _local_dt(ts: float, tz: str) -> datetime:
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ZoneInfo(tz))
 
 
-def find_recordings(source: str | Path, extensions, exclude_dir: Path | None = None
-                    ) -> list[Path]:
+def find_recordings(source: str | Path, extensions, exclude_dirs=()) -> list[Path]:
     """Recursively find recordings under `source` matching `extensions`.
 
-    Files under `exclude_dir` (e.g. the archive) are skipped so the archive is
-    never rescanned when it lives inside the source.
+    Files under any `exclude_dirs` (the pipeline's own archive/snippets/export
+    output) are skipped, so the pipeline never re-ingests its own products when
+    those dirs live inside the source.
     """
     exts = {e.lower() for e in extensions}
     source = Path(source)
-    exclude = exclude_dir.resolve() if exclude_dir else None
+    excludes = [Path(d).resolve() for d in exclude_dirs if d]
 
     def is_excluded(p: Path) -> bool:
-        """True if `p` is the excluded dir or lives inside it."""
-        if exclude is None:
-            return False
+        """True if `p` is one of the excluded dirs or lives inside one."""
         rp = p.resolve()
-        return rp == exclude or exclude in rp.parents
+        return any(rp == ex or ex in rp.parents for ex in excludes)
 
     return sorted(p for p in source.rglob("*")
                   if p.suffix.lower() in exts and not is_excluded(p))
@@ -71,16 +69,23 @@ def ingest(cfg, store: Store) -> dict:
     source = cfg.run.source
     archive_dir = cfg.path("archive_dir")
     archive_dir.mkdir(parents=True, exist_ok=True)
+    # Never re-ingest the pipeline's own output (archive/snippets/export),
+    # which may live inside the source dir.
+    managed = [archive_dir, cfg.path("snippets_dir"), cfg.path("export_dir")]
 
     added, skipped = 0, 0
-    for src in find_recordings(source, ic.file_extensions, exclude_dir=archive_dir):
+    for src in find_recordings(source, ic.file_extensions, exclude_dirs=managed):
         sha = sha256_file(src, ic.hash_chunk_bytes)
         if store.has_hash(sha):
             skipped += 1
             continue
 
         st = os.stat(src)                      # read timestamps from the CARD
-        dur = ffprobe_duration(src)
+        try:
+            dur = ffprobe_duration(src)
+        except RuntimeError as e:
+            log.warning("  skipping %s: %s", src.name, e)
+            continue
 
         # Integrity check: the file's modified time should be ~ start + duration.
         # A large drift means a wrong recorder clock or timestamps lost on copy.

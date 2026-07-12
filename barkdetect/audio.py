@@ -16,13 +16,22 @@ import numpy as np
 
 
 def ffprobe_duration(path: str | Path) -> float:
-    """Return media duration in seconds."""
+    """Return media duration in seconds.
+
+    Raises RuntimeError (not an opaque JSON/subprocess error) if ffprobe fails or
+    the file has no readable duration, so callers can skip the file cleanly.
+    """
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "json", str(path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True,
     )
-    return float(json.loads(out.stdout)["format"]["duration"])
+    if out.returncode != 0:
+        raise RuntimeError(f"ffprobe failed ({out.returncode}): {out.stderr.strip()}")
+    try:
+        return float(json.loads(out.stdout)["format"]["duration"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        raise RuntimeError(f"no readable duration ({e}); stdout={out.stdout!r}") from e
 
 
 def _read_exact(stream, n: int) -> bytes:
