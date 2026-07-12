@@ -55,9 +55,9 @@ def analyze(cfg, store: Store) -> dict:
 
         # --- detection (the slow phase) ---
         t = perf_counter()
-        times, scores, best = detect.score_recording(
+        times, scores, best, energy = detect.score_recording(
             rec["archived_path"], cfg, model, dog_idx, duration_sec=dur)
-        events = detect.extract_events(times, scores, best, dog_names, cfg)
+        events = detect.extract_events(times, scores, best, energy, dog_names, cfg)
         log.info("    detect: %.0fs, %d candidate events",
                  perf_counter() - t, len(events))
 
@@ -79,6 +79,7 @@ def analyze(cfg, store: Store) -> dict:
                 "peak_conf": ev["peak_conf"],
                 "mean_conf": ev["mean_conf"],
                 "top_class": ev["top_class"],
+                "intensity_raw": ev["intensity_raw"],
                 "snippet_path": rel,
             })
         log.info("    snippets: %.1fs (%d clips)", perf_counter() - t, len(events))

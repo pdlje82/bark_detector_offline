@@ -55,11 +55,14 @@ def test_extract_single_event():
     scores = np.zeros_like(times)
     scores[20:40] = 0.8              # 2.0s .. 4.0s
     best = np.zeros_like(times, dtype=int)
-    events = extract_events(times, scores, best, ["Dog", "Bark"], _det_cfg())
+    energy = np.zeros_like(times)
+    energy[25] = 0.42                # loudest instant within the event
+    events = extract_events(times, scores, best, energy, ["Dog", "Bark"], _det_cfg())
     assert len(events) == 1
     assert events[0]["top_class"] == "Dog"
     assert 1.9 < events[0]["offset_start_sec"] < 2.1
     assert events[0]["duration_sec"] > 1.5
+    assert events[0]["intensity_raw"] == 0.42   # peak raw energy over the span
 
 
 def test_merge_close_events_and_drop_short():
@@ -69,8 +72,19 @@ def test_merge_close_events_and_drop_short():
     scores[15:18] = 0.9             # gap of 0.2s -> merged
     scores[45:46] = 0.9             # 0.1s lone spike -> dropped (min 0.15s)
     best = np.zeros_like(times, dtype=int)
-    events = extract_events(times, scores, best, ["Dog"], _det_cfg())
+    energy = np.zeros_like(times)
+    events = extract_events(times, scores, best, energy, ["Dog"], _det_cfg())
     assert len(events) == 1         # two merged, short one dropped
+
+
+def test_frame_energy_rms_and_peak():
+    from barkdetect.detect import _frame_energy
+    raw = np.array([0.0, 0.0, 1.0, -1.0, 0.5, 0.5, 0.0, 0.0], dtype=np.float32)
+    peak = _frame_energy(raw, 2, "peak")        # two frames of 4 samples
+    assert list(peak) == [1.0, 0.5]
+    rms = _frame_energy(raw, 2, "rms")
+    assert abs(rms[0] - np.sqrt(0.5)) < 1e-6      # sqrt(mean(0,0,1,1)) = 0.707
+    assert abs(rms[1] - np.sqrt(0.125)) < 1e-6    # sqrt(mean(.25,.25,0,0)) = 0.354
 
 
 # --- coverage & gaps -------------------------------------------------------

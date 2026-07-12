@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS bark_events (
     peak_conf        REAL NOT NULL,
     mean_conf        REAL NOT NULL,
     top_class        TEXT NOT NULL,
+    intensity_raw    REAL,              -- raw loudness (linear 0..1); relative derived at export
     snippet_path     TEXT               -- relative to snippets_dir
 );
 

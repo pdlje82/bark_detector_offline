@@ -55,6 +55,10 @@ runs closer than `merge_gap_seconds`, and drops anything shorter than
 `min_event_seconds`. Each surviving run becomes one bark **event** with peak/mean
 confidence, its dominant class, and start/end offsets. Because the timeline is
 continuous, a bark straddling a window boundary is still detected as one event.
+In parallel, a raw-loudness envelope (measured from the **un-normalized** audio,
+so it reflects true relative volume) is captured on the same timeline, and each
+event gets the peak loudness within its span — later turned into
+`intensity_relative` (0–1) and `intensity_dbfs` at export (see `intensity`).
 
 **5. Absolute timing, snippets, provenance.** Event offsets are added to the
 recording's start time to get absolute UTC/local timestamps. A padded MP3 clip is
@@ -144,8 +148,9 @@ data/
 `results.json` contains: `parameters` (the model/normalization/detection
 settings used — recorded for reproducibility), `recordings`, `coverage`, `gaps`,
 `daily_summary`, and `events` (each with `abs_start_local`, `class`, `peak_conf`,
-`night`, `snippet_url`). Each recording also carries the exact `parameters` that
-produced its events. Serve `data/export/` and `data/snippets/` as static files
+`night`, `intensity_relative` (0–1, loudest bark in scope = 1), `intensity_dbfs`
+(absolute loudness), `snippet_url`). Each recording also carries the exact
+`parameters` that produced its events. Serve `data/export/` and `data/snippets/` as static files
 to the frontend.
 
 ## Configuration reference (`config.yml`)
@@ -216,6 +221,23 @@ repo**.
 | `min_event_seconds` 🔧 | `0.15` | Discard events shorter than this. |
 | `merge_gap_seconds` 🔧 | `0.4` | Merge two hot spans separated by less than this into one event. |
 | `dog_classes` 🔧 | `Dog, Bark, Bow-wow, Yip, Howl, Growling, Whimper (dog)` | AudioSet class names counted as barking. Names must match PANNs spelling exactly. |
+
+### `intensity` — per-event loudness
+
+Loudness is measured from the **raw, un-normalized** audio at ~10 ms resolution.
+The absolute value is stored; the `intensity_relative` (0–1) in `results.json` is
+derived, with `1.0` = the loudest bark in scope. Each event also carries
+`intensity_dbfs` (absolute), which stays comparable across files.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `metric` 🔧 | `rms` | `rms` (perceived energy) or `peak` (max amplitude within the bark). |
+| `scope` 🔧 | `per_file` | `per_file` = loudest bark in *each* recording is 1.0; `global` = loudest bark across *all* recordings is 1.0 (comparable between files). |
+
+> Note: intensity reflects what the microphone captured (distance, mic gain, and
+> the H6's limiter all affect it), not the dog's true loudness. In `per_file`
+> scope even a quiet night's loudest bark reads 1.0 — use `intensity_dbfs` for
+> absolute comparison.
 
 ### `ingest` — copy & identity
 

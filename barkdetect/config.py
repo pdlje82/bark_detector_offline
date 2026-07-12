@@ -37,6 +37,7 @@ class Config:
         self.audio = _to_ns(data["audio"])
         self.normalization = _to_ns(data["normalization"])
         self.detection = _to_ns(data["detection"])
+        self.intensity = _to_ns(data["intensity"])
         self.ingest = _to_ns(data["ingest"])
         self.snippets = _to_ns(data["snippets"])
         self.coverage = _to_ns(data["coverage"])
@@ -83,6 +84,10 @@ class Config:
             "audio": {
                 "sample_rate": self.audio.sample_rate,
                 "window_seconds": self.audio.window_seconds,
+            },
+            "intensity": {
+                "metric": self.intensity.metric,
+                "scope": self.intensity.scope,
             },
             "snippets": {
                 # documents whether listening clips were loudness-boosted

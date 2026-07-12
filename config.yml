@@ -60,6 +60,13 @@ detection:
     - Growling
     - Whimper (dog)
 
+# Per-event loudness, measured from the RAW (un-normalized) audio at ~10 ms
+# resolution. The absolute value (linear amplitude / dBFS) is stored; the 0..1
+# "relative" value is derived at export time — 1.0 = the loudest bark in scope.
+intensity:
+  metric: rms                 # rms (perceived energy) | peak (max amplitude)
+  scope: per_file             # per_file (loudest bark in each file = 1.0) | global (across all files)
+
 ingest:
   file_extensions: [".mp3"]              # which files to pick up from the source
   timestamp_source_label: sdcard_ctime  # how the recording start time was derived

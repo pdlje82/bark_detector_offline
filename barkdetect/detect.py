@@ -19,6 +19,22 @@ def _fmt_hms(seconds: float) -> str:
     return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
 
 
+def _frame_energy(raw: np.ndarray, n_frames: int, metric: str) -> np.ndarray:
+    """Per-frame loudness of the raw (un-normalized) window, aligned to the
+    model's frame grid. `metric` is 'rms' (energy) or 'peak' (max amplitude)."""
+    if n_frames <= 0 or raw.size == 0:
+        return np.zeros(max(n_frames, 0))
+    chunk = raw.size // n_frames
+    if chunk == 0:  # more frames than samples (tiny window) — one value for all
+        val = (np.abs(raw).max() if metric == "peak"
+               else float(np.sqrt(np.mean(raw ** 2))))
+        return np.full(n_frames, val)
+    trimmed = raw[:chunk * n_frames].reshape(n_frames, chunk)
+    if metric == "peak":
+        return np.abs(trimmed).max(axis=1)
+    return np.sqrt(np.mean(trimmed ** 2, axis=1))
+
+
 def load_model(device: str = "cpu", checkpoint_path: str | None = None):
     """Instantiate the PANNs SED model and return (model, labels)."""
     from panns_inference import SoundEventDetection
@@ -61,10 +77,11 @@ def score_recording(path: str | Path, cfg, model, dog_idx: list[int],
                     duration_sec: float | None = None):
     """Run the model over the whole file, returning per-frame arrays.
 
-    Returns (times, scores, best_dog_col):
+    Returns (times, scores, best_dog_col, energy):
       times          absolute offset (s) of each frame within the recording
       scores         max dog-class probability per frame
       best_dog_col   index into dog_idx of the strongest dog class per frame
+      energy         raw (un-normalized) loudness per frame, for intensity
 
     A live tqdm progress bar (total windows known from duration_sec) is shown
     unless disabled via cfg.logging.progress_bar.
@@ -72,6 +89,7 @@ def score_recording(path: str | Path, cfg, model, dog_idx: list[int],
     sr = cfg.audio.sample_rate
     window_sec = cfg.audio.window_seconds
     min_samples = int(cfg.audio.min_window_seconds * sr)
+    metric = cfg.intensity.metric
 
     total_windows = (math.ceil(duration_sec / window_sec)
                      if duration_sec else None)
@@ -80,33 +98,37 @@ def score_recording(path: str | Path, cfg, model, dog_idx: list[int],
         windows = tqdm(windows, total=total_windows, unit="win",
                        desc=Path(path).name, leave=False)
 
-    all_times, all_scores, all_best = [], [], []
+    all_times, all_scores, all_best, all_energy = [], [], [], []
     for win_start, arr in windows:
         if arr.size < min_samples:
             continue
         if duration_sec:
             log.debug("  at %s / %s", _fmt_hms(win_start), _fmt_hms(duration_sec))
-        arr = normalize_window(arr, cfg.normalization)
+        raw = arr                                           # keep un-normalized samples
+        arr = normalize_window(arr, cfg.normalization)      # for detection only
         framewise = model.inference(arr[None, :])          # (1, F, C)
         framewise = np.asarray(framewise)[0]               # (F, C)
         dog = framewise[:, dog_idx]                         # (F, ndog)
         frame_score = dog.max(axis=1)
         frame_best = dog.argmax(axis=1)
         F = framewise.shape[0]
-        dt = (arr.size / sr) / F
+        dt = (raw.size / sr) / F
         times = win_start + np.arange(F) * dt
         all_times.append(times)
         all_scores.append(frame_score)
         all_best.append(frame_best)
+        all_energy.append(_frame_energy(raw, F, metric))
 
     if not all_times:
-        return np.array([]), np.array([]), np.array([], dtype=int)
+        empty = np.array([])
+        return empty, empty, np.array([], dtype=int), empty
     return (np.concatenate(all_times),
             np.concatenate(all_scores),
-            np.concatenate(all_best))
+            np.concatenate(all_best),
+            np.concatenate(all_energy))
 
 
-def extract_events(times, scores, best, dog_class_names, cfg) -> list[dict]:
+def extract_events(times, scores, best, energy, dog_class_names, cfg) -> list[dict]:
     """Turn a per-frame score timeline into discrete bark events."""
     if times.size == 0:
         return []
@@ -149,6 +171,8 @@ def extract_events(times, scores, best, dog_class_names, cfg) -> list[dict]:
         seg = scores[a:b + 1]
         peak_i = a + int(np.argmax(seg))
         top_class = dog_class_names[int(best[peak_i])]
+        # loudest instant of this bark in the raw audio (absolute, linear 0..1)
+        intensity_raw = float(energy[a:b + 1].max()) if energy.size else 0.0
         events.append({
             "offset_start_sec": round(t0, 3),
             "offset_end_sec": round(t1, 3),
@@ -156,5 +180,6 @@ def extract_events(times, scores, best, dog_class_names, cfg) -> list[dict]:
             "peak_conf": round(float(seg.max()), 4),
             "mean_conf": round(float(seg.mean()), 4),
             "top_class": top_class,
+            "intensity_raw": round(intensity_raw, 6),
         })
     return events

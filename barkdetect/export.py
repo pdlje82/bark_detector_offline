@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,11 @@ from .coverage import compute_coverage
 from .store import Store
 
 log = logging.getLogger(__name__)
+
+
+def _dbfs(raw: float) -> float:
+    """Linear amplitude (0..1) -> dBFS, floored at -120."""
+    return round(20 * math.log10(raw), 1) if raw and raw > 0 else -120.0
 
 
 def _is_night(local_dt: datetime, night_start: int, night_end: int) -> bool:
@@ -29,12 +35,26 @@ def build_export(cfg, store: Store) -> dict:
 
     coverage, gaps = compute_coverage(recordings, cfg.coverage.merge_gap_seconds)
 
+    # Reference loudness for the 0..1 relative intensity. "global" = loudest bark
+    # across all recordings; "per_file" = loudest bark within each recording.
+    raws = [e["intensity_raw"] for e in events if e["intensity_raw"] is not None]
+    global_max = max(raws) if raws else None
+    file_max = defaultdict(float)
+    for e in events:
+        if e["intensity_raw"] is not None:
+            file_max[e["recording_id"]] = max(file_max[e["recording_id"]],
+                                              e["intensity_raw"])
+    per_file = cfg.intensity.scope != "global"
+
     event_list = []
     daily = defaultdict(lambda: {"count": 0, "total_bark_seconds": 0.0, "night_count": 0})
     for e in events:
         local_start = datetime.fromisoformat(e["abs_start_utc"]).astimezone(tz)
         night = _is_night(local_start, cfg.coverage.night_start_hour,
                           cfg.coverage.night_end_hour)
+        raw = e["intensity_raw"]
+        ref = file_max[e["recording_id"]] if per_file else global_max
+        rel = round(raw / ref, 4) if (raw is not None and ref) else None
         event_list.append({
             "id": e["id"],
             "recording": e["original_filename"],
@@ -46,6 +66,8 @@ def build_export(cfg, store: Store) -> dict:
             "mean_conf": e["mean_conf"],
             "class": e["top_class"],
             "night": night,
+            "intensity_relative": rel,
+            "intensity_dbfs": _dbfs(raw) if raw is not None else None,
             "snippet_url": f"snippets/{e['snippet_path']}" if e["snippet_path"] else None,
         })
         day = local_start.date().isoformat()
