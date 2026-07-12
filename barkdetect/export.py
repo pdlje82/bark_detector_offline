@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 from .coverage import compute_coverage
 from .store import Store
+
+log = logging.getLogger(__name__)
 
 
 def _is_night(local_dt: datetime, night_start: int, night_end: int) -> bool:
@@ -91,6 +94,6 @@ def export(cfg, store: Store) -> Path:
     out = export_dir / cfg.export.filename
     with open(out, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    print(f"  wrote {out}  ({data['event_count']} events, "
-          f"{len(data['gaps'])} gaps)")
+    log.info("  wrote %s  (%d events, %d gaps)",
+             out, data["event_count"], len(data["gaps"]))
     return out

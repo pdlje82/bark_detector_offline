@@ -7,6 +7,7 @@ BARKDETECT_CONFIG environment variable.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,6 +41,7 @@ class Config:
         self.snippets = _to_ns(data["snippets"])
         self.coverage = _to_ns(data["coverage"])
         self.export = _to_ns(data["export"])
+        self.logging = _to_ns(data["logging"])
         self._paths = data["paths"]
 
     def path(self, key: str) -> Path:
@@ -80,3 +82,28 @@ class Config:
     def resolve(cls) -> "Config":
         """Load the active config, honoring the BARKDETECT_CONFIG env var."""
         return cls.load(os.environ.get(CONFIG_ENV_VAR, DEFAULT_CONFIG))
+
+
+def setup_logging(cfg: Config) -> None:
+    """Configure the root logger from config: console + optional audit file."""
+    level = getattr(logging, str(cfg.logging.level).upper(), logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)-5s %(message)s",
+                            datefmt="%Y-%m-%d %H:%M:%S")
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.handlers.clear()
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    log_file = getattr(cfg.logging, "log_file", None)
+    if log_file:
+        path = Path(log_file)
+        if not path.is_absolute():
+            path = cfg.project_root / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(path, encoding="utf-8")   # append across runs
+        fh.setFormatter(fmt)
+        root.addHandler(fh)

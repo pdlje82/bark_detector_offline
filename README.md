@@ -25,6 +25,65 @@ reproducible and re-runnable (idempotent).
    (with absolute local timestamps and snippet URLs), **recording coverage and
    gaps**, and per-day summaries (incl. night counts).
 
+## How inference works
+
+The analyze step is the heavy part. It is designed to process arbitrarily long
+recordings (24 h+) on a CPU with flat memory and predictable progress.
+
+**1. Single-pass streaming decode.** A recording is never loaded whole. `ffmpeg`
+decodes the MP3 in one forward pass to mono 32 kHz float32 PCM (PANNs' required
+format) and pipes it out; `audio.stream_windows` reads that pipe in fixed
+`audio.window_seconds` chunks (default 60 s). Memory stays constant regardless of
+file length — a 24 h file uses the same RAM as a 1 min file.
+
+**2. Per-window normalization.** Each window is peak-normalized before detection
+(`audio.normalize_window`): quiet audio is boosted toward `target_peak`, capped by
+`max_gain`, and a `noise_floor` guard leaves near-silent windows untouched so
+background hiss is not amplified into false positives.
+
+**3. Model inference (the bottleneck).** Each window is run through the PANNs
+`Cnn14_DecisionLevelMax` Sound Event Detection model, which returns a frame-level
+probability (~100 frames/s) for all 527 AudioSet classes. This forward pass is
+what makes analysis slow on CPU; everything else is negligible. For each frame we
+keep only the **max probability across the configured `dog_classes`** and which
+dog class won.
+
+**4. Timeline assembly & event extraction.** Per-window frame scores are
+concatenated into one continuous timeline for the whole file. `detect.extract_events`
+then: thresholds frames at `detection.threshold` (low = high recall), merges hot
+runs closer than `merge_gap_seconds`, and drops anything shorter than
+`min_event_seconds`. Each surviving run becomes one bark **event** with peak/mean
+confidence, its dominant class, and start/end offsets. Because the timeline is
+continuous, a bark straddling a window boundary is still detected as one event.
+
+**5. Absolute timing, snippets, provenance.** Event offsets are added to the
+recording's start time to get absolute UTC/local timestamps. A padded MP3 clip is
+cut per event for later listening, and the exact parameter set used is stored with
+the recording (see `parameters` in `results.json`) so results are reproducible.
+
+Latency scales with audio length, not file count. Tuning knobs: raise
+`window_seconds` to reduce per-call overhead, or (not yet wired) increase
+`torch` CPU threads.
+
+### Logging & progress
+
+Analysis logs each stage and its timing, plus a **realtime factor** (audio time
+processed per wall-clock second) so remaining time is predictable — e.g.
+`ZOOM0007.MP3 done — 128 events in 12m23s (34.8x realtime)` means a 7 h file
+takes ~12 min. A live per-file progress bar (`tqdm`) shows percentage and ETA.
+
+Configure via the `logging` block in `config.yml`:
+
+```yaml
+logging:
+  level: INFO            # DEBUG adds a per-window "at HH:MM:SS / HH:MM:SS" position line
+  progress_bar: true     # live tqdm bar; set false for headless/cron/redirected runs
+  log_file: data/processing.log  # timestamped audit trail (appended); null = console only
+```
+
+The `log_file` doubles as a processing audit trail for evidence: a timestamped
+record of when each file was analyzed and with what result.
+
 ## Setup (conda / mamba)
 
 ```bash

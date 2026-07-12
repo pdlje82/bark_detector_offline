@@ -6,14 +6,17 @@ which steps run, the source path, and every parameter in config.yml.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
 from .analyze import analyze
-from .config import Config
+from .config import Config, setup_logging
 from .export import export
 from .ingest import ingest
 from .store import Store
+
+log = logging.getLogger(__name__)
 
 # step name -> callable(cfg, store)
 STEP_FUNCS = {
@@ -46,14 +49,15 @@ def _validate(cfg) -> list[str]:
 
 def main():
     cfg = Config.resolve()
+    setup_logging(cfg)
     steps = _validate(cfg)
 
     store = Store(cfg.path("db_path"))
     with store:
         for i, step in enumerate(steps, 1):
-            print(f"[{i}/{len(steps)}] {step} ...")
+            log.info("[%d/%d] %s ...", i, len(steps), step)
             STEP_FUNCS[step](cfg, store)
-    print("All done.")
+    log.info("All done.")
 
 
 if __name__ == "__main__":

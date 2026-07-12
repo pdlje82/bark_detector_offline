@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+import math
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from .audio import normalize_window, stream_windows
+
+log = logging.getLogger(__name__)
+
+
+def _fmt_hms(seconds: float) -> str:
+    seconds = int(seconds)
+    return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
 
 
 def load_model(device: str = "cpu", checkpoint_path: str | None = None):
@@ -47,21 +57,35 @@ def resolve_dog_indices(labels: list[str], dog_classes: list[str]) -> list[int]:
     return idx
 
 
-def score_recording(path: str | Path, cfg, model, dog_idx: list[int]):
+def score_recording(path: str | Path, cfg, model, dog_idx: list[int],
+                    duration_sec: float | None = None):
     """Run the model over the whole file, returning per-frame arrays.
 
     Returns (times, scores, best_dog_col):
       times          absolute offset (s) of each frame within the recording
       scores         max dog-class probability per frame
       best_dog_col   index into dog_idx of the strongest dog class per frame
+
+    A live tqdm progress bar (total windows known from duration_sec) is shown
+    unless disabled via cfg.logging.progress_bar.
     """
     sr = cfg.audio.sample_rate
+    window_sec = cfg.audio.window_seconds
     min_samples = int(cfg.audio.min_window_seconds * sr)
 
+    total_windows = (math.ceil(duration_sec / window_sec)
+                     if duration_sec else None)
+    windows = stream_windows(path, sr, window_sec)
+    if cfg.logging.progress_bar:
+        windows = tqdm(windows, total=total_windows, unit="win",
+                       desc=Path(path).name, leave=False)
+
     all_times, all_scores, all_best = [], [], []
-    for win_start, arr in stream_windows(path, sr, cfg.audio.window_seconds):
+    for win_start, arr in windows:
         if arr.size < min_samples:
             continue
+        if duration_sec:
+            log.debug("  at %s / %s", _fmt_hms(win_start), _fmt_hms(duration_sec))
         arr = normalize_window(arr, cfg.normalization)
         framewise = model.inference(arr[None, :])          # (1, F, C)
         framewise = np.asarray(framewise)[0]               # (F, C)

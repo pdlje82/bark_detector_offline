@@ -77,3 +77,8 @@ coverage:
 
 export:
   filename: results.json      # output file written into export_dir
+
+logging:
+  level: INFO                 # DEBUG | INFO | WARNING (DEBUG adds per-window position)
+  progress_bar: true          # live tqdm bar per file; set false for headless/cron runs
+  log_file: data/processing.log  # append a timestamped audit log; null = console only

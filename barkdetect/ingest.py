@@ -11,6 +11,7 @@ All behavior is driven by config (run.source, ingest.*). No hardcoded params.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from zoneinfo import ZoneInfo
 
 from .audio import ffprobe_duration
 from .store import Store
+
+log = logging.getLogger(__name__)
 
 
 def sha256_file(path: str | Path, chunk: int) -> str:
@@ -80,8 +83,8 @@ def ingest(cfg, store: Store) -> dict:
             "ingested_at": datetime.now(timezone.utc).isoformat(),
         })
         added += 1
-        print(f"  ingested {src.name}  ({dur/3600:.2f}h)  "
-              f"start={_iso_local(st.st_ctime, cfg.timezone)}")
+        log.info("  ingested %s  (%.2fh)  start=%s",
+                 src.name, dur / 3600, _iso_local(st.st_ctime, cfg.timezone))
 
-    print(f"  {added} added, {skipped} already known.")
+    log.info("  %d added, %d already known.", added, skipped)
     return {"added": added, "skipped": skipped}
