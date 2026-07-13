@@ -15,6 +15,9 @@ from .store import Store
 
 log = logging.getLogger(__name__)
 
+# Bump when the results.json shape changes in a way the frontend must handle.
+SCHEMA_VERSION = 1
+
 
 def _dbfs(raw: float) -> float:
     """Linear amplitude (0..1) -> dBFS, floored at -120."""
@@ -86,6 +89,7 @@ def build_export(cfg, store: Store) -> dict:
     ]
 
     return {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": cfg.timezone,
         "parameters": cfg.params_snapshot(),   # current config used for this export

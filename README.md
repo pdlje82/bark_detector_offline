@@ -198,9 +198,14 @@ data/
   export/results.json frontend input
 ```
 
-`results.json` contains: `parameters` (the model/normalization/detection
-settings used — recorded for reproducibility), `recordings`, `coverage`, `gaps`,
-`daily_summary`, and `events` (each with `abs_start_local`, `class`, `peak_conf`,
+The full `results.json` contract is documented in
+[`docs/results-schema.md`](docs/results-schema.md), with a real example in
+[`docs/sample_results.json`](docs/sample_results.json). The frontend design brief
+(a prompt for claude.ai) is in [`docs/design-brief.md`](docs/design-brief.md).
+
+`results.json` contains: `schema_version`, `parameters` (the
+model/normalization/detection settings used — recorded for reproducibility),
+`recordings`, `coverage`, `gaps`, `daily_summary`, and `events` (each with `abs_start_local`, `class`, `peak_conf`,
 `night`, `intensity_relative` (0–1, loudest bark in scope = 1), `intensity_dbfs`
 (absolute loudness), `snippet_url`). Each recording also carries the exact
 `parameters` that produced its events. Serve `data/export/` and `data/snippets/` as static files
