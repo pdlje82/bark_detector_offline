@@ -54,10 +54,24 @@ CREATE TABLE IF NOT EXISTS event_labels (
     labeled_at TEXT
 );
 
+"""
+
+# Indexes are created AFTER column migration (they may reference newly-added columns).
+INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_events_recording ON bark_events(recording_id);
 CREATE INDEX IF NOT EXISTS idx_events_absstart  ON bark_events(abs_start_utc);
 CREATE INDEX IF NOT EXISTS idx_events_key        ON bark_events(event_key);
 """
+
+# Columns added after the initial schema. On an existing DB they are added via
+# ALTER TABLE ADD COLUMN (all nullable), so upgrading never requires a rebuild.
+MIGRATIONS = {
+    "recordings": {"mtime_utc": "TEXT", "parameters_json": "TEXT"},
+    "bark_events": {
+        "intensity_raw": "REAL", "event_key": "TEXT", "embedding": "TEXT",
+        "dog_label": "TEXT", "dog_confidence": "REAL", "dog_label_source": "TEXT",
+    },
+}
 
 
 class Store:
@@ -75,7 +89,17 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+        self.conn.executescript(INDEXES)
         self.conn.commit()
+
+    def _migrate(self):
+        """Add any columns missing from an older DB (ALTER TABLE ADD COLUMN)."""
+        for table, cols in MIGRATIONS.items():
+            existing = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            for name, coltype in cols.items():
+                if name not in existing:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")
 
     def close(self):
         """Close the database connection."""

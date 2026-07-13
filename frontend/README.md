@@ -58,7 +58,15 @@ beyond the existing `fetch('./results.json')`.
 - **Labeling** — each event in the table and detail gets a label control next to
   its play button. Selections are stored in `localStorage` keyed by the event's
   `key`, so they survive reloads.
-- **Speed** — a "Show unlabeled only" filter and keyboard shortcuts: `1`–`9`
+- **Status at a glance** — every event shows a status dot in **both** modes (in the
+  table, the detail card, the 24h timeline ticks, and the calendar): *unlabeled*
+  (hollow), *confirmed* = the human label matches the model suggestion (green),
+  or *relabeled* = the human label differs from the suggestion (amber). The
+  header shows running `confirmed · relabeled · unlabeled` counts, and the
+  calendar marks each day as fully or partly reviewed.
+- **Status filter** — a Status dropdown (All / Labeled / Unlabeled / Confirmed /
+  Relabeled) narrows the event log.
+- **Speed** — keyboard shortcuts: `1`–`9`
   assign a roster option, `0` clears, `Space` plays/pauses the current clip,
   `J`/`K` (or `↓`/`↑`) step through events, and `N` jumps to the next unlabeled.
 - **Export** — the "Export labels" button downloads a `labels.json`:

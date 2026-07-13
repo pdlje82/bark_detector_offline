@@ -236,6 +236,11 @@
   .labelrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
   .labelrow .lk { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .shortcuts { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 8px; line-height: 1.6; }
+  .stdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; box-sizing: border-box; flex-shrink: 0; vertical-align: middle; }
+  .stlegend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 11px; color: var(--muted); margin: -4px 0 14px; }
+  .stlegend span { display: flex; align-items: center; gap: 6px; }
+  .stlegend i.stdot { width: 10px; height: 10px; }
+  .calst { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; }
 
   /* ---- responsive ---- */
   @media (max-width: 900px) {
@@ -300,10 +305,15 @@
           </label>
           <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
           <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
-          <label class="train-only"><input type="checkbox" id="f-unlabeled"> Show unlabeled only</label>
+          <label>Status <select id="f-status"><option value="all">All</option><option value="labeled">Labeled</option><option value="unlabeled">Unlabeled</option><option value="confirmed">Confirmed</option><option value="relabeled">Relabeled</option></select></label>
           <button class="btn train-only" id="exportLabels" data-action="exportLabels">Export labels</button>
-          <span class="shown train-only" id="labelstats"></span>
+          <span class="shown" id="labelstats"></span>
           <span class="shown" id="shown"></span>
+        </div>
+        <div class="stlegend">
+          <span><i class="stdot" style="background:transparent;border:1.5px dashed var(--faint)"></i>unlabeled</span>
+          <span><i class="stdot" style="background:#2f8a5b;border:1.5px solid #2f8a5b"></i>confirmed (matches suggestion)</span>
+          <span><i class="stdot" style="background:#c98a3e;border:1.5px solid #c98a3e"></i>relabeled (differs)</span>
         </div>
         <div id="tableWrap"></div>
       </div>
@@ -340,7 +350,7 @@
     sortDir: 1,
     training: false,
     labels: {},
-    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, unlabeled: false }
+    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all" }
   };
 
   /* ---------- boot ---------- */
@@ -452,6 +462,39 @@
   function loadLabels() { try { return JSON.parse(localStorage.getItem(LABELS_KEY) || "{}") || {}; } catch (e) { return {}; } }
   function saveLabels(m) { try { localStorage.setItem(LABELS_KEY, JSON.stringify(m)); } catch (e) {} }
   function evKey(e) { return e.key != null ? String(e.key) : ("id:" + e.id); }
+  function eventByKey(key) { for (var i = 0; i < R.events.length; i++) if (evKey(R.events[i]) === key) return R.events[i]; return null; }
+  function evStatus(e) {
+    var v = state.labels[evKey(e)];
+    if (!v) return "unlabeled";
+    if (e.dog_label != null && e.dog_label !== "" && String(v) === String(e.dog_label)) return "confirmed";
+    return "relabeled";
+  }
+  function statusMeta(st) {
+    if (st === "confirmed") return { c: "#2f8a5b", t: "Confirmed \u2014 matches suggestion" };
+    if (st === "relabeled") return { c: "#c98a3e", t: "Relabeled \u2014 differs from suggestion" };
+    return { c: "", t: "Unlabeled" };
+  }
+  function statusDotStyle(st) {
+    if (st === "unlabeled") return "background:transparent;border:1.5px dashed var(--faint)";
+    return "background:" + statusMeta(st).c + ";border:1.5px solid " + statusMeta(st).c;
+  }
+  function statusDot(e) {
+    var st = evStatus(e);
+    return '<span class="stdot" data-statusfor="' + esc(evKey(e)) + '" title="' + esc(statusMeta(st).t) + '" style="' + statusDotStyle(st) + '"></span>';
+  }
+  function updateStatusDom(key) {
+    var e = eventByKey(key); if (!e) return; var st = evStatus(e), m = statusMeta(st);
+    document.querySelectorAll(".stdot[data-statusfor]").forEach(function (el) {
+      if (el.getAttribute("data-statusfor") !== key) return;
+      el.setAttribute("style", statusDotStyle(st)); el.title = m.t;
+    });
+  }
+  function dayLabelState(dateStr) {
+    var evs = eventsOnDay(dateStr); if (!evs.length) return null;
+    var labeled = evs.filter(function (o) { return state.labels[evKey(o.e)]; }).length;
+    if (labeled === 0) return "none";
+    return labeled === evs.length ? "all" : "some";
+  }
   function rosterDogs() {
     return (R.dogs || []).map(function (d) {
       if (typeof d === "string") return { id: d, name: d };
@@ -502,18 +545,20 @@
     document.querySelectorAll(".mylabel[data-mylabel]").forEach(function (el) {
       if (el.getAttribute("data-mylabel") === key) { el.className = "mylabel " + (val ? "set" : "none"); el.textContent = val ? labelName(val) : "unlabeled"; }
     });
-    if (state.filters.unlabeled) renderTable();
+    updateStatusDom(key);
     updateLabelStats();
+    renderCalendar();
+    if (state.filters.status !== "all") renderTable();
   }
   function updateLabelStats() {
     var el = $("#labelstats"); if (!el) return;
-    var n = R.events.length, done = R.events.filter(function (e) { return state.labels[evKey(e)]; }).length;
-    el.textContent = done + " / " + n + " labeled";
+    var c = 0, r = 0, u = 0;
+    R.events.forEach(function (e) { var s = evStatus(e); if (s === "confirmed") c++; else if (s === "relabeled") r++; else u++; });
+    el.textContent = c + " confirmed \u00b7 " + r + " relabeled \u00b7 " + u + " unlabeled";
   }
   function toggleTraining() {
     state.training = !state.training;
     var root = $("#root"); if (root) root.classList.toggle("training", state.training);
-    if (!state.training) { state.filters.unlabeled = false; var cb = $("#f-unlabeled"); if (cb) cb.checked = false; }
     renderSummary(); renderTable(); renderDay(); updateLabelStats();
   }
   function exportLabels() {
@@ -619,12 +664,19 @@
         var hatch = rec ? "" : " hatch";
         var numColor = rec ? "var(--ink)" : "var(--faint)";
         var title = rec ? dayLabel(dateStr) + ": " + count + " detection" + (count === 1 ? "" : "s") + (night ? " (" + night + " night)" : "") : dayLabel(dateStr) + ": no recording";
+        var lst = rec ? dayLabelState(dateStr) : null;
+        var calst = "";
+        if (lst) {
+          var cc = lst === "all" ? "#2f8a5b" : lst === "some" ? "#c98a3e" : "";
+          calst = '<span class="calst" title="' + (lst === "all" ? "all reviewed" : lst === "some" ? "partly reviewed" : "not reviewed") + '" style="' + (lst === "none" ? "background:transparent;border:1.5px dashed var(--faint)" : "background:" + cc) + '"></span>';
+        }
         html += '<div class="' + cls + hatch + '" style="background:' + bg + '"' +
           (rec ? ' data-action="selectDay" data-date="' + dateStr + '"' : "") +
           ' title="' + esc(title) + '">' +
           '<span class="dnum" style="color:' + numColor + '">' + d + '</span>' +
           '<span class="cnt">' + (rec && count > 0 ? count : "") + '</span>' +
           '<span class="ndot" style="background:' + (night > 0 ? "var(--night)" : "transparent") + '"></span>' +
+          calst +
         '</div>';
       }
       html += '</div></div>';
@@ -634,6 +686,8 @@
         '<span><i class="sw" style="background:#eadfce"></i>events (darker = more)</span>' +
         '<span><i class="sw line hatch"></i>no recording</span>' +
         '<span><i class="sw dot" style="background:var(--night)"></i>night</span>' +
+        '<span><i class="sw dot" style="background:#2f8a5b"></i>all reviewed</span>' +
+        '<span><i class="sw dot" style="background:#c98a3e"></i>partly reviewed</span>' +
       '</div>';
     $("#calWrap").innerHTML = html;
   }
@@ -657,7 +711,7 @@
 
     var pct = function (ms) { return Math.max(0, Math.min(DAY, ms)) / DAY * 100; };
     var ovSegs = segsFor(mid, 0, DAY, pct);
-    var ovTicks = dayEvents.map(function (o) { return '<div class="tick" style="left:' + pct(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + '"></div>'; }).join("");
+    var ovTicks = dayEvents.map(function (o) { var st = evStatus(o.e); var ring = st !== "unlabeled" ? ";box-shadow:0 0 0 1.5px " + statusMeta(st).c : ""; return '<div class="tick" style="left:' + pct(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + ring + '"></div>'; }).join("");
 
     var span = STEPS[state.roiZoom];
     var center = state.roiCenter;
@@ -667,7 +721,7 @@
     var rp = function (ms) { return (ms - lo) / (hi - lo) * 100; };
     var roiSegs = segsFor(mid, lo, hi, rp);
     var roiRaw = dayEvents.filter(function (o) { var r = o.w.t - mid; return r >= lo && r <= hi; });
-    var roiTicks = roiRaw.map(function (o) { return '<div class="tick" style="left:' + rp(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + '"></div>'; }).join("");
+    var roiTicks = roiRaw.map(function (o) { var st = evStatus(o.e); var ring = st !== "unlabeled" ? ";box-shadow:0 0 0 1.5px " + statusMeta(st).c : ""; return '<div class="tick" style="left:' + rp(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + ring + '"></div>'; }).join("");
 
     var summary = sum ? (sum.count + " detection" + (sum.count === 1 ? "" : "s") + " \u00b7 " + sum.night_count + " at night") : "No recording this day";
 
@@ -679,7 +733,7 @@
       var sw = wall(selEv.abs_start_local);
       selHtml =
         '<div class="selpanel">' +
-          '<div class="r1"><span class="evdot" style="background:' + intensityColor(selEv.intensity_relative) + '"></span>' +
+          '<div class="r1">' + statusDot(selEv) + '<span class="evdot" style="background:' + intensityColor(selEv.intensity_relative) + '"></span>' +
             '<span class="cls">' + esc(selEv.class) + '</span>' +
             '<span class="mono" style="font-size:14px">' + sw.time + '</span>' +
             (selEv.night ? '<span class="evnight">night</span>' : "") + predHtml(selEv) + '</div>' +
@@ -742,6 +796,7 @@
         (e.night ? '<span class="evnight">night</span>' : "") + '</div>' +
         '<div class="evmeta">' + meta + '</div>' +
         (predHtml(e) ? '<div style="margin-top:6px">' + predHtml(e) + '</div>' : "") + '</div>' +
+      statusDot(e) +
       '<button class="play" data-action="playEvent" data-id="' + e.id + '" title="Play clip" aria-label="Play clip">\u25b6</button>' +
     '</div>';
   }
@@ -776,7 +831,7 @@
       if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
       if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
       if (f.dayOnly && state.selDate && wall(e.abs_start_local).date !== state.selDate) return false;
-      if (f.unlabeled && state.labels[evKey(e)]) return false;
+      if (f.status !== "all") { var st = evStatus(e); if (f.status === "labeled" ? st === "unlabeled" : st !== f.status) return false; }
       return true;
     }).map(function (e) { return { e: e, w: wall(e.abs_start_local) }; });
 
@@ -798,6 +853,7 @@
     $("#shown").textContent = rows.length + " of " + R.events.length + " shown";
     var head =
       '<thead><tr>' +
+        '<th></th>' +
         '<th data-sort="time">Time<span class="arr">' + arr("time") + '</span></th>' +
         '<th>Date</th>' +
         '<th data-sort="class">Class<span class="arr">' + arr("class") + '</span></th>' +
@@ -812,6 +868,7 @@
     var body = rows.map(function (o) {
       var e = o.e, on = e.id === state.selId;
       return '<tr class="' + (on ? "on" : "") + '">' +
+        '<td data-label="Status">' + statusDot(e) + '</td>' +
         '<td class="mono" data-label="Time">' + o.w.time + '</td>' +
         '<td class="mono" data-label="Date" style="color:var(--muted)">' + MON[parseInt(o.w.date.slice(5,7),10)-1] + " " + parseInt(o.w.date.slice(8,10),10) + '</td>' +
         '<td class="cls-cell" data-label="Class"><span class="clsdot" style="background:' + intensityColor(e.intensity_relative) + '"></span>' + esc(e.class) + (e.night ? '<span class="tag">night</span>' : "") + '</td>' +
@@ -824,7 +881,7 @@
         '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">\u25b6</button></td>' +
       '</tr>';
     }).join("");
-    $("#tableWrap").innerHTML = '<div style="overflow-x:auto"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="10" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
+    $("#tableWrap").innerHTML = '<div style="overflow-x:auto"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="11" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
   }
 
   /* ---------- render: provenance ---------- */
@@ -884,7 +941,7 @@
     sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); });
     $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); });
     $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); });
-    $("#f-unlabeled").addEventListener("change", function (e) { state.filters.unlabeled = e.target.checked; renderTable(); });
+    $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderTable(); });
 
     $("#root").addEventListener("change", function (ev) {
       var s = ev.target.closest && ev.target.closest("select.labelsel");
