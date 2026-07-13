@@ -12,9 +12,10 @@ of coverage/gaps are in the file's `timezone`. Durations are seconds (float).
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schema_version` | int | Contract version. Frontend should check it (currently `1`). |
+| `schema_version` | int | Contract version. Frontend should check it (currently `2`). |
 | `generated_at` | string (UTC) | When this file was exported. |
 | `timezone` | string | IANA zone for all local times (e.g. `Europe/Berlin`). |
+| `dogs` | array of string | The dog roster (real names) — options for the labeling dropdown. |
 | `parameters` | object | Settings that produced this export (see below) — for provenance. |
 | `recording_count` | int | Number of source recordings. |
 | `event_count` | int | Number of bark events. |
@@ -61,12 +62,14 @@ not "no barking".
 | `count` | int | Bark events that day. |
 | `total_bark_seconds` | float | Summed event duration. |
 | `night_count` | int | Events in the night window (config `night_start_hour`..`night_end_hour`). |
+| `by_dog` | object | `{ dog_name: count }` — events attributed to each dog that day (human or predicted; excludes unsure/multiple/not-a-dog). May be empty. |
 
 ## `events[]`
 
 | Field | Type | Meaning |
 |---|---|---|
-| `id` | int | Stable id. |
+| `id` | int | Row id (not stable across DB rebuilds — use `key` for labels). |
+| `key` | string | **Stable** event id (`<sha12>_<offsetms>`). Use this as the label key. |
 | `recording` | string | Source `original_filename`. |
 | `abs_start_utc` / `abs_start_local` | string | When the bark occurred. |
 | `abs_end_utc` | string | End of the event. |
@@ -76,7 +79,29 @@ not "no barking".
 | `night` | bool | Fell in the night window. |
 | `intensity_relative` | float 0..1 \| null | Loudness relative to the loudest bark in scope (1.0 = loudest). |
 | `intensity_dbfs` | float \| null | Absolute loudness in dBFS (comparable across files). |
+| `dog_label` | string \| null | Resolved dog: a roster name, or `unsure`/`multiple`/`not_a_dog`, or null. |
+| `dog_confidence` | float 0..1 \| null | Model confidence when predicted; null for human labels. |
+| `dog_label_source` | string \| null | `human` (confirmed by a listener) or `predicted` (model suggestion) or null. **Render `predicted` as a suggestion, never as fact.** |
 | `snippet_url` | string \| null | Path to the playable clip, relative to `results.json` (e.g. `snippets/<hash>/<name>.mp3`). |
+
+## `labels.json` (frontend → backend)
+
+Produced by the website's training mode and dropped into the pipeline
+(`identification.labels_path`). The pipeline ingests it, trains the classifier,
+and predicts a dog for every event.
+
+```json
+{
+  "schema": 1,
+  "exported_at": "2026-07-13T21:00:00Z",
+  "labels": {
+    "<event.key.a>": "rex",
+    "<event.key.b>": "not_a_dog"
+  }
+}
+```
+`labels` maps each event's stable `key` to a label ∈ the `dogs` roster ∪
+{`unsure`, `multiple`, `not_a_dog`}. Human labels always override predictions.
 
 ## Serving
 

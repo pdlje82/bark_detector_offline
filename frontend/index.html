@@ -214,6 +214,29 @@
   .provgrid .kv .pv { font-family: var(--mono); text-align: right; word-break: break-all; }
   .foot { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: center; margin-top: 22px; }
 
+  /* ---- training mode ---- */
+  #root:not(.training) .train-only { display: none !important; }
+  .switch { margin-top: 12px; align-self: flex-start; display: inline-flex; align-items: center; gap: 9px; background: transparent; border: 1px solid var(--band-line); color: var(--band-ink); padding: 6px 12px 6px 8px; border-radius: 999px; cursor: pointer; }
+  .switch .knob { width: 34px; height: 18px; border-radius: 999px; background: #3a3934; position: relative; transition: background .15s; flex-shrink: 0; }
+  .switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #cfccc4; transition: left .15s; }
+  .switch[aria-pressed="true"] .knob { background: var(--night-lite); }
+  .switch[aria-pressed="true"] .knob::after { left: 18px; background: #fff; }
+  .switch .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .btn { padding: 7px 12px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 7px; cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--faint); }
+  .pred { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .pred.confirmed { background: rgba(59,74,107,0.14); color: var(--night); border: 1px solid var(--night); }
+  .pred.suggested { background: transparent; color: var(--faint); border: 1px dashed var(--line2); }
+  .pred .ptag { font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
+  @media (prefers-color-scheme: dark) { .pred.confirmed { color: var(--night-lite); border-color: var(--night-lite); } }
+  .mylabel { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .mylabel.none { color: var(--faint); border: 1px dashed var(--line2); }
+  .mylabel.set { color: var(--paper); background: var(--ink); }
+  select.labelsel { font-family: var(--sans); font-size: 12px; padding: 5px 7px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 6px; max-width: 170px; }
+  .labelrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .labelrow .lk { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .shortcuts { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 8px; line-height: 1.6; }
+
   /* ---- responsive ---- */
   @media (max-width: 900px) {
     .cols { grid-template-columns: 1fr; }
@@ -277,6 +300,9 @@
           </label>
           <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
           <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
+          <label class="train-only"><input type="checkbox" id="f-unlabeled"> Show unlabeled only</label>
+          <button class="btn train-only" id="exportLabels" data-action="exportLabels">Export labels</button>
+          <span class="shown train-only" id="labelstats"></span>
           <span class="shown" id="shown"></span>
         </div>
         <div id="tableWrap"></div>
@@ -312,7 +338,9 @@
     selId: null,
     sortKey: "time",
     sortDir: 1,
-    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0 }
+    training: false,
+    labels: {},
+    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, unlabeled: false }
   };
 
   /* ---------- boot ---------- */
@@ -419,6 +447,115 @@
     return months;
   }
 
+  /* ---------- training / labeling ---------- */
+  var LABELS_KEY = "barkdetect.labels.v1";
+  function loadLabels() { try { return JSON.parse(localStorage.getItem(LABELS_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  function saveLabels(m) { try { localStorage.setItem(LABELS_KEY, JSON.stringify(m)); } catch (e) {} }
+  function evKey(e) { return e.key != null ? String(e.key) : ("id:" + e.id); }
+  function rosterDogs() {
+    return (R.dogs || []).map(function (d) {
+      if (typeof d === "string") return { id: d, name: d };
+      return { id: (d.id != null ? d.id : d.name), name: (d.name != null ? d.name : d.id) };
+    });
+  }
+  function labelOptions() {
+    return rosterDogs().concat([
+      { id: "unsure", name: "Unsure" },
+      { id: "multiple", name: "Multiple dogs" },
+      { id: "not_a_dog", name: "Not a dog (false positive)" }
+    ]);
+  }
+  function labelName(id) {
+    if (id == null || id === "") return "";
+    var o = labelOptions().filter(function (x) { return String(x.id) === String(id); })[0];
+    return o ? o.name : String(id);
+  }
+  function predHtml(e) {
+    if (e.dog_label == null || e.dog_label === "") return "";
+    var conf = e.dog_confidence != null ? Math.round(e.dog_confidence * 100) + "%" : "";
+    var human = e.dog_label_source === "human";
+    return '<span class="pred ' + (human ? "confirmed" : "suggested") + '">' +
+      esc(labelName(e.dog_label)) + (conf ? " \u00b7 " + conf : "") +
+      (human ? "" : '<span class="ptag">suggested</span>') + '</span>';
+  }
+  function labelSelect(e) {
+    var cur = state.labels[evKey(e)] || "";
+    var opts = '<option value="">\u2014 label \u2014</option>' + labelOptions().map(function (o) {
+      return '<option value="' + esc(o.id) + '"' + (String(o.id) === String(cur) ? " selected" : "") + '>' + esc(o.name) + '</option>';
+    }).join("");
+    return '<select class="labelsel" data-key="' + esc(evKey(e)) + '">' + opts + '</select>';
+  }
+  function labelBlock(e) {
+    var cur = state.labels[evKey(e)] || "";
+    return '<div class="labelrow"><span class="lk">Your label</span>' + labelSelect(e) +
+      '<span class="mylabel ' + (cur ? "set" : "none") + '" data-mylabel="' + esc(evKey(e)) + '">' + (cur ? esc(labelName(cur)) : "unlabeled") + '</span></div>' +
+      '<div class="shortcuts">1\u20139 assign \u00b7 0 clear \u00b7 Space play/pause \u00b7 J / K (or \u2193 / \u2191) next / prev \u00b7 N next unlabeled</div>';
+  }
+  function setLabel(key, val, inPlace) {
+    if (val === "" || val == null) delete state.labels[key]; else state.labels[key] = val;
+    saveLabels(state.labels);
+    if (inPlace) applyLabelDom(key); else { renderTable(); renderDay(); updateLabelStats(); }
+  }
+  function applyLabelDom(key) {
+    var val = state.labels[key] || "";
+    document.querySelectorAll("select.labelsel").forEach(function (s) { if (s.getAttribute("data-key") === key) s.value = val; });
+    document.querySelectorAll(".mylabel[data-mylabel]").forEach(function (el) {
+      if (el.getAttribute("data-mylabel") === key) { el.className = "mylabel " + (val ? "set" : "none"); el.textContent = val ? labelName(val) : "unlabeled"; }
+    });
+    if (state.filters.unlabeled) renderTable();
+    updateLabelStats();
+  }
+  function updateLabelStats() {
+    var el = $("#labelstats"); if (!el) return;
+    var n = R.events.length, done = R.events.filter(function (e) { return state.labels[evKey(e)]; }).length;
+    el.textContent = done + " / " + n + " labeled";
+  }
+  function toggleTraining() {
+    state.training = !state.training;
+    var root = $("#root"); if (root) root.classList.toggle("training", state.training);
+    if (!state.training) { state.filters.unlabeled = false; var cb = $("#f-unlabeled"); if (cb) cb.checked = false; }
+    renderSummary(); renderTable(); renderDay(); updateLabelStats();
+  }
+  function exportLabels() {
+    var payload = { schema: 1, exported_at: new Date().toISOString(), labels: {} };
+    Object.keys(state.labels).forEach(function (k) { if (state.labels[k]) payload.labels[k] = state.labels[k]; });
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = "labels.json";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 0);
+  }
+  function step(dir) {
+    var rows = filteredRows(); if (!rows.length) return;
+    var idx = -1; for (var i = 0; i < rows.length; i++) if (rows[i].e.id === state.selId) { idx = i; break; }
+    var ni = idx < 0 ? (dir > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, idx + dir));
+    selectEvent(rows[ni].e.id, false);
+  }
+  function nextUnlabeled() {
+    var rows = filteredRows(); if (!rows.length) return;
+    var idx = -1; for (var i = 0; i < rows.length; i++) if (rows[i].e.id === state.selId) { idx = i; break; }
+    for (var j = 1; j <= rows.length; j++) { var r = rows[(idx + j) % rows.length]; if (!state.labels[evKey(r.e)]) { selectEvent(r.e.id, false); return; } }
+  }
+  function assignCurrent(id) {
+    if (state.selId == null) return;
+    var e = null; for (var i = 0; i < R.events.length; i++) if (R.events[i].id === state.selId) { e = R.events[i]; break; }
+    if (!e) return; setLabel(evKey(e), id, true);
+  }
+  function togglePlay() { if (audio) { if (audio.paused) { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } else audio.pause(); } }
+  function onKey(ev) {
+    if (!state.training) return;
+    var t = ev.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+    var opts = labelOptions();
+    var k = ev.key;
+    if (k === "ArrowDown" || k === "j" || k === "J") { step(1); ev.preventDefault(); }
+    else if (k === "ArrowUp" || k === "k" || k === "K") { step(-1); ev.preventDefault(); }
+    else if (k === "n" || k === "N") { nextUnlabeled(); ev.preventDefault(); }
+    else if (k === " " || k === "Spacebar") { togglePlay(); ev.preventDefault(); }
+    else if (k >= "1" && k <= "9") { var i2 = parseInt(k, 10) - 1; if (i2 < opts.length) { assignCurrent(opts[i2].id); ev.preventDefault(); } }
+    else if (k === "0") { assignCurrent(""); ev.preventDefault(); }
+  }
+
   /* ---------- render: summary band ---------- */
   function renderSummary() {
     var ds = R.daily_summary;
@@ -437,6 +574,7 @@
         '<div class="eyebrow">Acoustic detection report</div>' +
         '<div class="h1">Dog-barking evidence</div>' +
         '<div class="sub">' + esc(range) + ' \u00b7 ' + esc(R.timezone || "") + '</div>' +
+        '<button class="switch" data-action="toggleTraining" aria-pressed="' + (state.training ? "true" : "false") + '" title="Toggle training / labeling mode"><span class="knob"></span><span class="lbl">Training mode</span></button>' +
       '</div>' +
       '<div class="stats">' +
         stat(R.event_count != null ? R.event_count : R.events.length, "Detections", "") +
@@ -449,8 +587,10 @@
       return '<div class="stat"><span class="num ' + cls + '">' + esc(num) + '</span><span class="lbl">' + esc(lbl) + '</span></div>';
     }
 
-    if (R.schema_version !== 1) {
-      $("#warnSlot").innerHTML = '<div class="warn">This file reports schema version <b>' + esc(R.schema_version) + '</b>; this viewer was built for version 1. Some fields may not display correctly.</div>';
+    if ([1, 2].indexOf(R.schema_version) === -1) {
+      $("#warnSlot").innerHTML = '<div class="warn">This file reports schema version <b>' + esc(R.schema_version) + '</b>; this viewer supports versions 1\u20132. Some fields may not display correctly.</div>';
+    } else {
+      $("#warnSlot").innerHTML = "";
     }
   }
 
@@ -542,7 +682,7 @@
           '<div class="r1"><span class="evdot" style="background:' + intensityColor(selEv.intensity_relative) + '"></span>' +
             '<span class="cls">' + esc(selEv.class) + '</span>' +
             '<span class="mono" style="font-size:14px">' + sw.time + '</span>' +
-            (selEv.night ? '<span class="evnight">night</span>' : "") + '</div>' +
+            (selEv.night ? '<span class="evnight">night</span>' : "") + predHtml(selEv) + '</div>' +
           '<div class="grid4">' +
             kv("Duration", fmtDur(selEv.duration_sec)) +
             kv("Peak conf.", fmtConf(selEv.peak_conf)) +
@@ -550,6 +690,7 @@
             kv("Rel. intensity", fmtRel(selEv.intensity_relative)) +
           '</div>' +
           audioHtml(selEv) +
+          (state.training ? labelBlock(selEv) : "") +
         '</div>';
     }
 
@@ -599,7 +740,8 @@
       '<span class="evdot" style="background:' + intensityColor(e.intensity_relative) + '"></span>' +
       '<div class="evbody"><div class="evtop"><span class="cls">' + esc(e.class) + '</span><span class="t">' + w.time + '</span>' +
         (e.night ? '<span class="evnight">night</span>' : "") + '</div>' +
-        '<div class="evmeta">' + meta + '</div></div>' +
+        '<div class="evmeta">' + meta + '</div>' +
+        (predHtml(e) ? '<div style="margin-top:6px">' + predHtml(e) + '</div>' : "") + '</div>' +
       '<button class="play" data-action="playEvent" data-id="' + e.id + '" title="Play clip" aria-label="Play clip">\u25b6</button>' +
     '</div>';
   }
@@ -634,6 +776,7 @@
       if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
       if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
       if (f.dayOnly && state.selDate && wall(e.abs_start_local).date !== state.selDate) return false;
+      if (f.unlabeled && state.labels[evKey(e)]) return false;
       return true;
     }).map(function (e) { return { e: e, w: wall(e.abs_start_local) }; });
 
@@ -662,6 +805,8 @@
         '<th class="r" data-sort="conf">Conf<span class="arr">' + arr("conf") + '</span></th>' +
         '<th class="r" data-sort="dbfs">Loudness<span class="arr">' + arr("dbfs") + '</span></th>' +
         '<th class="r">Rel</th>' +
+        '<th>Dog</th>' +
+        '<th class="train-only">Your label</th>' +
         '<th></th>' +
       '</tr></thead>';
     var body = rows.map(function (o) {
@@ -674,10 +819,12 @@
         '<td class="mono r" data-label="Conf">' + fmtConf(e.peak_conf) + '</td>' +
         '<td class="mono r" data-label="Loudness">' + fmtDbfs(e.intensity_dbfs) + '</td>' +
         '<td class="mono r" data-label="Rel">' + fmtRel(e.intensity_relative) + '</td>' +
+        '<td data-label="Dog">' + (predHtml(e) || "\u2014") + '</td>' +
+        '<td class="train-only" data-label="Your label">' + labelSelect(e) + '</td>' +
         '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">\u25b6</button></td>' +
       '</tr>';
     }).join("");
-    $("#tableWrap").innerHTML = '<div style="overflow-x:auto"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="8" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
+    $("#tableWrap").innerHTML = '<div style="overflow-x:auto"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="10" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
   }
 
   /* ---------- render: provenance ---------- */
@@ -737,6 +884,13 @@
     sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); });
     $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); });
     $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); });
+    $("#f-unlabeled").addEventListener("change", function (e) { state.filters.unlabeled = e.target.checked; renderTable(); });
+
+    $("#root").addEventListener("change", function (ev) {
+      var s = ev.target.closest && ev.target.closest("select.labelsel");
+      if (s) setLabel(s.getAttribute("data-key"), s.value, true);
+    });
+    document.addEventListener("keydown", onKey);
 
     // delegated clicks
     $("#root").addEventListener("click", function (ev) {
@@ -749,7 +903,9 @@
       }
       if (!el) return;
       var a = el.getAttribute("data-action");
-      if (a === "selectDay") selectDay(el.getAttribute("data-date"));
+      if (a === "toggleTraining") { toggleTraining(); return; }
+      else if (a === "exportLabels") { exportLabels(); return; }
+      else if (a === "selectDay") selectDay(el.getAttribute("data-date"));
       else if (a === "selectEvent") selectEvent(el.getAttribute("data-id"), false);
       else if (a === "playEvent") { ev.stopPropagation(); selectEvent(el.getAttribute("data-id"), true); }
       else if (a === "zoomIn") { state.roiZoom = Math.min(STEPS.length - 1, state.roiZoom + 1); renderDay(); }
@@ -773,6 +929,7 @@
     R.recordings = R.recordings || [];
     offMin = detectOff();
     classes = R.events.map(function (e) { return e.class; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).sort();
+    state.labels = loadLabels();
 
     // default selected day: first day with events, else first recorded day, else first month day
     if (R.daily_summary.length) state.selDate = R.daily_summary[0].date;
@@ -789,6 +946,7 @@
     bindControls();
     renderTable();
     renderProv();
+    updateLabelStats();
 
     $("#loading").hidden = true;
     $("#root").hidden = false;

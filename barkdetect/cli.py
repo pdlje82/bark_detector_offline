@@ -13,6 +13,7 @@ from pathlib import Path
 from .analyze import analyze
 from .config import Config, setup_logging
 from .export import export
+from .identify import identify
 from .ingest import ingest
 from .publish import publish
 from .store import Store
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 STEP_FUNCS = {
     "ingest": ingest,
     "analyze": analyze,
+    "identify": identify,
     "export": export,
     "publish": publish,
 }

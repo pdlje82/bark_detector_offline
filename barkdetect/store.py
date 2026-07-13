@@ -38,11 +38,25 @@ CREATE TABLE IF NOT EXISTS bark_events (
     mean_conf        REAL NOT NULL,
     top_class        TEXT NOT NULL,
     intensity_raw    REAL,              -- raw loudness (linear 0..1); relative derived at export
-    snippet_path     TEXT               -- relative to snippets_dir
+    snippet_path     TEXT,              -- relative to snippets_dir
+    event_key        TEXT,              -- stable id (sha12_offsetms) for label joins
+    embedding        TEXT,              -- JSON float array (bark fingerprint) for identification
+    dog_label        TEXT,              -- resolved dog (human or predicted)
+    dog_confidence   REAL,              -- prediction confidence (null for human labels)
+    dog_label_source TEXT               -- 'human' | 'predicted' | null
+);
+
+-- Human labels keyed by the stable event_key, so they survive DB rebuilds.
+CREATE TABLE IF NOT EXISTS event_labels (
+    event_key  TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'human',
+    labeled_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_recording ON bark_events(recording_id);
 CREATE INDEX IF NOT EXISTS idx_events_absstart  ON bark_events(abs_start_utc);
+CREATE INDEX IF NOT EXISTS idx_events_key        ON bark_events(event_key);
 """
 
 
@@ -144,3 +158,35 @@ class Store:
                ORDER BY e.abs_start_utc"""
         )
         return cur.fetchall()
+
+    # --- identification --------------------------------------------------
+    def upsert_label(self, event_key: str, label: str, source: str, labeled_at: str):
+        """Insert or replace a human label for a stable event_key."""
+        self.conn.execute(
+            "INSERT INTO event_labels (event_key, label, source, labeled_at) "
+            "VALUES (?,?,?,?) ON CONFLICT(event_key) DO UPDATE SET "
+            "label=excluded.label, source=excluded.source, labeled_at=excluded.labeled_at",
+            (event_key, label, source, labeled_at),
+        )
+
+    def all_labels(self) -> dict[str, str]:
+        """Return {event_key: label} for all stored human labels."""
+        cur = self.conn.execute("SELECT event_key, label FROM event_labels")
+        return {r["event_key"]: r["label"] for r in cur.fetchall()}
+
+    def events_with_embeddings(self) -> list[sqlite3.Row]:
+        """Return events that have an embedding, with their key and embedding."""
+        cur = self.conn.execute(
+            "SELECT id, event_key, embedding FROM bark_events "
+            "WHERE embedding IS NOT NULL"
+        )
+        return cur.fetchall()
+
+    def set_event_prediction(self, event_id: int, dog_label: str | None,
+                             confidence: float | None, source: str | None):
+        """Store the resolved dog label + source (+ confidence) on an event."""
+        self.conn.execute(
+            "UPDATE bark_events SET dog_label=?, dog_confidence=?, dog_label_source=? "
+            "WHERE id=?",
+            (dog_label, confidence, source, event_id),
+        )

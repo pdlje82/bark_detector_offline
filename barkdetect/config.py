@@ -46,6 +46,7 @@ class Config:
         self.normalization = _to_ns(data["normalization"])
         self.detection = _to_ns(data["detection"])
         self.intensity = _to_ns(data["intensity"])
+        self.identification = _to_ns(data["identification"])
         self.ingest = _to_ns(data["ingest"])
         self.snippets = _to_ns(data["snippets"])
         self.coverage = _to_ns(data["coverage"])
@@ -96,6 +97,12 @@ class Config:
             "intensity": {
                 "metric": self.intensity.metric,
                 "scope": self.intensity.scope,
+            },
+            "identification": {
+                "enabled": self.identification.enabled,
+                "embedding": self.identification.embedding,
+                "classifier": self.identification.classifier,
+                "dogs": list(self.identification.dogs),
             },
             "snippets": {
                 # documents whether listening clips were loudness-boosted

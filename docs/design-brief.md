@@ -69,6 +69,41 @@ Deliver one `index.html`. Start simple and correct; we'll iterate on styling.
 
 ---
 
+## Training mode (schema v2 — per-dog labeling)
+
+Paste this as a follow-up once the base app exists. It adds a labeling workflow
+so residents can teach the system to tell the dogs apart.
+
+> Add a **Training mode** to `index.html`, **off by default**, toggled by a switch
+> in the header. When off, all existing views are unchanged. Keep the page fully
+> static — the only network call remains `fetch('./results.json')`.
+>
+> **Roster:** read `RESULTS.dogs` (array of dog names) for the label options.
+> Always add three fixed options: `Unsure`, `Multiple dogs`, `Not a dog` (false
+> positive). The stored label values are the roster names verbatim, or
+> `unsure` / `multiple` / `not_a_dog`.
+>
+> **Labeling (training mode on):** each event in the table/detail gets a labeling
+> control (dropdown or button group) beside its play button. Selecting a value
+> records `{ [event.key]: label }` — use `event.key` (the stable id), never
+> `event.id`. Persist all labels in `localStorage` so they survive reloads. Show
+> the current label per row; provide a "show unlabeled only" filter and
+> keyboard shortcuts (play, then a key per dog) to label quickly.
+>
+> **Export:** an "Export labels" button downloads `labels.json`:
+> ```json
+> { "schema": 1, "exported_at": "<ISO>",
+>   "labels": { "<event.key.a>": "rex", "<event.key.b>": "not_a_dog" } }
+> ```
+>
+> **Predictions (both modes):** show `dog_label` with `dog_confidence`, clearly
+> distinguishing `dog_label_source === "human"` (confirmed — solid styling) from
+> `"predicted"` (a muted "suggested" tag). Never present a prediction as fact.
+> Optionally add a per-dog view driven by `daily_summary[].by_dog`.
+>
+> Conform to `docs/results-schema.md` (v2); use only fields defined there. Do not
+> touch backend files.
+
 ## After the prototype
 
 When the look is right, ask for the production version: identical UI but with the

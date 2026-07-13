@@ -46,6 +46,31 @@ Then open `http://localhost:8000/`.
 A copy of the sample results ships here as `results.json` for local testing;
 in production it is replaced by the real export.
 
+## Training mode (labeling)
+
+A **Training mode** toggle in the header (off by default) turns on a human
+labeling workflow for building/reviewing a dataset. All other views are
+unchanged when it's off, and the page stays fully static — no network calls
+beyond the existing `fetch('./results.json')`.
+
+- **Roster** — label options come from `RESULTS.dogs`, plus three fixed extras:
+  *Unsure*, *Multiple dogs*, and *Not a dog (false positive)*.
+- **Labeling** — each event in the table and detail gets a label control next to
+  its play button. Selections are stored in `localStorage` keyed by the event's
+  `key`, so they survive reloads.
+- **Speed** — a "Show unlabeled only" filter and keyboard shortcuts: `1`–`9`
+  assign a roster option, `0` clears, `Space` plays/pauses the current clip,
+  `J`/`K` (or `↓`/`↑`) step through events, and `N` jumps to the next unlabeled.
+- **Export** — the "Export labels" button downloads a `labels.json`:
+
+  ```json
+  { "schema": 1, "exported_at": "<ISO>",
+    "labels": { "<event.key>": "rex", "<event.key>": "not_a_dog" } }
+  ```
+
+Labels live only in the browser (localStorage) and in the exported file; the
+page never writes back to `results.json` or the backend.
+
 ## Behaviour notes
 
 - **Missing / unreadable data** — if `results.json` cannot be fetched or parsed,
@@ -53,9 +78,13 @@ in production it is replaced by the real export.
   button instead of a blank screen.
 - **Missing audio** — if a clip referenced by `snippet_url` is absent, its play
   control degrades gracefully and the event shows a "Clip unavailable" note.
-- **Schema version** — the page is built for `schema_version: 1`. If a file
+- **Schema version** — the page supports `schema_version` 1 and 2. If a file
   reports a different version it still renders, but a non-blocking warning banner
   is shown so consumers know some fields may not display correctly.
+- **Predictions vs. confirmations** — when present, each event's `dog_label` /
+  `dog_confidence` is shown in both modes. A `dog_label_source` of `"human"` is
+  styled as confirmed; `"predicted"` is shown muted with a "suggested" tag. A
+  prediction is never presented as confirmed.
 - **Honesty** — gaps between recordings are drawn explicitly and labelled
   "no recording" (never shown as quiet). Detection **confidence** and
   **loudness** (`dbfs` / relative intensity) are kept as separate columns;

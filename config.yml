@@ -11,6 +11,7 @@ run:
   steps:                      # stages to execute, in this order
     - ingest
     - analyze
+    - identify
     - export
     - publish
 
@@ -68,6 +69,27 @@ detection:
 intensity:
   metric: rms                 # rms (perceived energy) | peak (max amplitude)
   scope: per_file             # per_file (loudest bark in each file = 1.0) | global (across all files)
+
+# Per-dog identification. A frozen embedding is computed per bark; a lightweight
+# classifier is trained on YOUR labels (exported from the website as labels.json)
+# and predicts a dog for every event. Human labels are authoritative; model
+# predictions are advisory ("suggested, review").
+identification:
+  enabled: true
+  embedding: librosa            # librosa | panns | aves  (swappable)
+  classifier: logreg            # logreg | knn
+  min_labels_per_dog: 8         # need at least this many labels per dog before training
+  labels_path: data/labels.json # where the website's exported labels are dropped
+  model_path: data/models/dog_clf.joblib
+  dogs:                         # roster — REAL NAMES (fill these in)
+    - Socke
+    - Clooney
+    - Zareth
+    - Pastor
+    - Podenco
+    - Podenca
+    - PerroCarmen
+    - PerroLejano
 
 ingest:
   file_extensions: [".mp3"]              # which files to pick up from the source

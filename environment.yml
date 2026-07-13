@@ -9,6 +9,8 @@ dependencies:
   - numpy
   - librosa
   - pysoundfile   # conda-forge name for the `soundfile` PyPI package
+  - scikit-learn  # lightweight classifier for per-dog identification
+  - joblib        # persists the trained dog classifier
   - mutagen
   - pyyaml
   - tqdm

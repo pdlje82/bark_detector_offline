@@ -11,7 +11,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO))
 
 from barkdetect.audio import normalize_window
 from barkdetect.coverage import compute_coverage
@@ -75,6 +76,88 @@ def test_merge_close_events_and_drop_short():
     energy = np.zeros_like(times)
     events = extract_events(times, scores, best, energy, ["Dog"], _det_cfg())
     assert len(events) == 1         # two merged, short one dropped
+
+
+def test_librosa_features_fixed_length():
+    """Embedding features are a fixed-length, finite 1-D vector regardless of input length."""
+    from barkdetect.embeddings import _librosa_features
+    sr = 32000
+    rng = np.random.default_rng(0)
+    short = rng.standard_normal(sr // 2).astype(np.float32)   # 0.5s
+    long = rng.standard_normal(sr * 3).astype(np.float32)     # 3s
+    v1 = _librosa_features(short, sr)
+    v2 = _librosa_features(long, sr)
+    assert v1.ndim == 1 and v1.shape == v2.shape and v1.size > 0
+    assert np.isfinite(v1).all() and np.isfinite(v2).all()
+
+
+def _seed_events_with_embeddings(store, keys_labels, dim=8):
+    """Insert one recording and events with 2-cluster embeddings; return {key: vec}."""
+    rng = np.random.default_rng(1)
+    rid = store.add_recording(dict(
+        sha256="s"*64, original_filename="R.mp3", archived_path="x", file_size=1,
+        duration_sec=100.0, sample_rate=32000, start_utc="2026-07-06T00:00:00+00:00",
+        start_local="2026-07-06T02:00:00+02:00", timezone="Europe/Berlin",
+        timestamp_source="t", mtime_utc="2026-07-06T00:00:00+00:00",
+        ingested_at="2026-07-06T00:00:00+00:00"))
+    import json as _json
+    centers = {"rex": np.array([3.0] + [0]*(dim-1)), "bella": np.array([0, 3.0] + [0]*(dim-2))}
+    for i, (key, label) in enumerate(keys_labels):
+        base = centers["rex"] if (label == "rex" or (label is None and i % 2 == 0)) else centers["bella"]
+        vec = (base + rng.standard_normal(dim) * 0.2).astype(np.float32)
+        store.add_event(dict(recording_id=rid, offset_start_sec=float(i), offset_end_sec=float(i)+0.5,
+            abs_start_utc="2026-07-06T00:00:%02d+00:00" % i, abs_end_utc="2026-07-06T00:00:%02d+00:00" % i,
+            duration_sec=0.5, peak_conf=0.9, mean_conf=0.8, top_class="Bark",
+            event_key=key, embedding=_json.dumps(vec.tolist())))
+    store.commit()
+
+
+def test_identify_train_and_predict(tmp_path):
+    """Human labels win; the classifier predicts a dog for unlabeled events."""
+    from barkdetect.store import Store
+    from barkdetect.identify import _train, _predict_all
+    store = Store(tmp_path / "t.db")
+    labeled = [(f"k_rex_{i}", "rex") for i in range(4)] + [(f"k_bella_{i}", "bella") for i in range(4)]
+    unlabeled = [("k_new_0", None), ("k_new_1", None)]
+    _seed_events_with_embeddings(store, labeled + unlabeled)
+    now = "2026-07-06T00:00:00+00:00"
+    for key, lbl in labeled:
+        store.upsert_label(key, lbl, "human", now)
+    store.commit()
+
+    cfg = SimpleNamespace(identification=SimpleNamespace(
+        min_labels_per_dog=3, classifier="logreg",
+        model_path=str(tmp_path / "clf.joblib")),
+        resolve_path=lambda p: tmp_path / str(p))
+    labels = store.all_labels()
+    model = _train(cfg, store, labels)
+    assert model is not None
+    _predict_all(store, labels, model)
+
+    evs = {e["event_key"]: e for e in store.all_events()}
+    assert evs["k_rex_0"]["dog_label_source"] == "human"
+    assert evs["k_new_0"]["dog_label_source"] == "predicted"
+    assert evs["k_new_0"]["dog_label"] in {"rex", "bella"}
+    assert 0.0 <= evs["k_new_0"]["dog_confidence"] <= 1.0
+
+
+def test_export_includes_identity(tmp_path):
+    """build_export surfaces dogs roster, per-event key and dog fields, and per-dog daily counts."""
+    from barkdetect.config import Config
+    from barkdetect.store import Store
+    from barkdetect.export import build_export
+    cfg = Config.load(str(_REPO / "config.yml"))
+    store = Store(tmp_path / "t.db")
+    _seed_events_with_embeddings(store, [("k0", "rex"), ("k1", "bella")])
+    store.set_event_prediction(1, "rex", None, "human")
+    store.set_event_prediction(2, "bella", 0.77, "predicted")
+    data = build_export(cfg, store)
+    assert data["schema_version"] == 2
+    assert isinstance(data["dogs"], list)
+    e0 = data["events"][0]
+    assert set(["key", "dog_label", "dog_confidence", "dog_label_source"]).issubset(e0)
+    assert "by_dog" in data["daily_summary"][0]
+    assert data["daily_summary"][0]["by_dog"].get("rex", 0) >= 1
 
 
 def test_publish_bundle(tmp_path):

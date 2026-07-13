@@ -16,6 +16,7 @@ from time import perf_counter
 
 from . import detect
 from .detect import _fmt_hms
+from .embeddings import embed_segment
 from .snippets import extract_snippet, snippet_relpath
 from .store import Store
 
@@ -77,12 +78,21 @@ def analyze(cfg, store: Store) -> dict:
         # --- snippets ---
         t = perf_counter()
         store.clear_events(rec["id"])          # idempotent re-analysis
+        identify_on = cfg.identification.enabled
         for ev in events:
             event_local = start_local + timedelta(seconds=ev["offset_start_sec"])
             rel = snippet_relpath(cfg, rec["sha256"], event_local,
                                   ev["offset_start_sec"], ev["intensity_raw"])
             extract_snippet(rec["archived_path"], snippets_dir, rel,
                             ev["offset_start_sec"], ev["duration_sec"], cfg)
+            # stable id (independent of intensity/dbfs) used to join human labels
+            ms = int(round(ev["offset_start_sec"] * 1000))
+            event_key = f"{rec['sha256'][:12]}_{ms:09d}"
+            embedding = None
+            if identify_on:
+                vec = embed_segment(rec["archived_path"], ev["offset_start_sec"],
+                                    ev["duration_sec"], cfg)
+                embedding = json.dumps([round(float(x), 6) for x in vec])
             store.add_event({
                 "recording_id": rec["id"],
                 "offset_start_sec": ev["offset_start_sec"],
@@ -95,6 +105,8 @@ def analyze(cfg, store: Store) -> dict:
                 "top_class": ev["top_class"],
                 "intensity_raw": ev["intensity_raw"],
                 "snippet_path": rel,
+                "event_key": event_key,
+                "embedding": embedding,
             })
         log.info("    snippets: %.1fs (%d clips)", perf_counter() - t, len(events))
 
