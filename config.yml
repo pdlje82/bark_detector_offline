@@ -12,6 +12,7 @@ run:
     - ingest
     - analyze
     - export
+    - publish
 
 paths:
   # Base dir that the relative paths below resolve against. Set this to your
@@ -22,6 +23,7 @@ paths:
   snippets_dir: data/snippets # per-event audio clips (served to the frontend)
   db_path: data/barks.db      # SQLite source of truth
   export_dir: data/export     # results JSON for the frontend
+  site_dir: data/site         # 'publish' bundle: index.html + results.json + snippets (deploy unit)
 
 # Timezone of the Zoom H6 recorder AND this PC. FAT timestamps on the SD card
 # are stored in local wall-clock time; this must match the recorder's clock.

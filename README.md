@@ -175,7 +175,7 @@ operation, leave it as:
 ```yaml
 run:
   source: "E:/DCIM"
-  steps: [ingest, analyze, export]
+  steps: [ingest, analyze, export, publish]
 ```
 
 To only re-export: `steps: [export]`. To re-analyze without re-copying:
@@ -202,6 +202,24 @@ The full `results.json` contract is documented in
 [`docs/results-schema.md`](docs/results-schema.md), with a real example in
 [`docs/sample_results.json`](docs/sample_results.json). The frontend design brief
 (a prompt for claude.ai) is in [`docs/design-brief.md`](docs/design-brief.md).
+
+### Publishing the frontend
+
+The `publish` step assembles a self-contained static bundle in `site_dir`
+(`data/site` by default) containing **only** public material: `frontend/index.html`,
+the exported `results.json`, and the `snippets/` clips — never the original
+recordings, the database, or logs. It's the single deploy unit.
+
+Serve/preview it locally over HTTP (the page uses `fetch`, so `file://` won't
+work):
+
+```bash
+python -m http.server -d data/site 8000   # then open http://localhost:8000
+```
+
+Snippets are synced incrementally, so re-running `publish` after a new batch
+only copies new clips. To deploy, upload `data/site/` to a static host (see the
+hosting notes / deploy step).
 
 `results.json` contains: `schema_version`, `parameters` (the
 model/normalization/detection settings used — recorded for reproducibility),
@@ -240,6 +258,7 @@ dirs live inside `run.source`.
 | `snippets_dir` | `data/snippets` | Per-event audio clips (served to the frontend). |
 | `db_path` | `data/barks.db` | SQLite source of truth. |
 | `export_dir` | `data/export` | Where `results.json` is written. |
+| `site_dir` | `data/site` | The `publish` bundle: `index.html` + `results.json` + `snippets/` — the deploy unit. |
 
 ### `timezone`
 

@@ -77,6 +77,35 @@ def test_merge_close_events_and_drop_short():
     assert len(events) == 1         # two merged, short one dropped
 
 
+def test_publish_bundle(tmp_path):
+    """publish assembles index.html + real results.json + snippets, excludes the rest."""
+    from barkdetect.publish import publish
+    root = tmp_path
+    # repo-side frontend/
+    fe = root / "frontend"; fe.mkdir()
+    (fe / "index.html").write_text("<html>app</html>", encoding="utf-8")
+    (fe / "results.json").write_text('{"sample": true}', encoding="utf-8")  # sample, must NOT win
+    # data-side dirs
+    (root / "export").mkdir()
+    (root / "export" / "results.json").write_text('{"real": true}', encoding="utf-8")
+    snips = root / "snippets" / "abc"; snips.mkdir(parents=True)
+    (snips / "clip.mp3").write_bytes(b"AUDIO")
+    (root / "archive").mkdir(); (root / "archive" / "ZOOM.MP3").write_bytes(b"HUGE")  # must NOT be published
+
+    cfg = SimpleNamespace(
+        project_root=root,
+        export=SimpleNamespace(filename="results.json"),
+        path=lambda k: {"site_dir": root / "site", "export_dir": root / "export",
+                        "snippets_dir": root / "snippets"}[k])
+    publish(cfg, store=None)
+
+    site = root / "site"
+    assert (site / "index.html").read_text(encoding="utf-8") == "<html>app</html>"
+    assert (site / "results.json").read_text(encoding="utf-8") == '{"real": true}'  # real, not sample
+    assert (site / "snippets" / "abc" / "clip.mp3").read_bytes() == b"AUDIO"
+    assert not (site / "archive").exists()                    # originals never published
+
+
 def test_snippet_name_template():
     from datetime import datetime
     from zoneinfo import ZoneInfo
