@@ -155,7 +155,9 @@
   .zoom .zl { font-family: var(--mono); font-size: 15px; font-weight: 600; }
   .zoom .zr { font-family: var(--mono); font-size: 12px; color: var(--faint); }
 
-  .evlist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .evlist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; max-height: 572px; overflow-y: auto; scrollbar-width: thin; }
+  .evlist::-webkit-scrollbar { width: 8px; }
+  .evlist::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 4px; }
   .evcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); background: var(--field); border-radius: 11px; cursor: pointer; }
   .evcard.sel { border-color: var(--ink); background: var(--ink); color: var(--paper); }
   .evcard.sel .evmeta { color: #b8b5ac; }
@@ -707,7 +709,7 @@
     if (!dateStr) { wrap.innerHTML = '<div class="empty">Select a day in the calendar.</div>'; return; }
     var mid = dayMid(dateStr);
     var sum = daySummary(dateStr);
-    var dayEvents = eventsOnDay(dateStr);
+    var dayEvents = eventsOnDay(dateStr).filter(function (o) { return eventMatches(o.e); });
 
     var pct = function (ms) { return Math.max(0, Math.min(DAY, ms)) / DAY * 100; };
     var ovSegs = segsFor(mid, 0, DAY, pct);
@@ -766,7 +768,7 @@
       '<div class="axis"><span style="left:0">' + msToHM(lo) + '</span><span style="right:0">' + msToHM(hi) + '</span></div>' +
       '<div class="caps">Events in window</div>' +
       (roiRaw.length ? '<div class="evlist">' + roiRaw.map(function (o) { return evCard(o.e, o.w); }).join("") + '</div>'
-                     : '<div class="empty">No events in this window \u2014 zoom out or move it.</div>');
+                     : '<div class="empty">No events match here \u2014 adjust filters, zoom out, or move the window.</div>');
 
     // wire audio for the selected event
     setupAudio(selEv);
@@ -823,15 +825,20 @@
   }
 
   /* ---------- render: table ---------- */
+  function eventMatches(e) {
+    var f = state.filters;
+    if (f.night && !e.night) return false;
+    if (f.cls !== "all" && e.class !== f.cls) return false;
+    if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
+    if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
+    if (f.status !== "all") { var st = evStatus(e); if (f.status === "labeled" ? st === "unlabeled" : st !== f.status) return false; }
+    return true;
+  }
   function filteredRows() {
     var f = state.filters;
     var rows = R.events.filter(function (e) {
-      if (f.night && !e.night) return false;
-      if (f.cls !== "all" && e.class !== f.cls) return false;
-      if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
-      if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
+      if (!eventMatches(e)) return false;
       if (f.dayOnly && state.selDate && wall(e.abs_start_local).date !== state.selDate) return false;
-      if (f.status !== "all") { var st = evStatus(e); if (f.status === "labeled" ? st === "unlabeled" : st !== f.status) return false; }
       return true;
     }).map(function (e) { return { e: e, w: wall(e.abs_start_local) }; });
 
@@ -936,12 +943,12 @@
     var sel = $("#f-cls");
     classes.forEach(function (c) { var o = document.createElement("option"); o.value = c; o.textContent = c; sel.appendChild(o); });
 
-    $("#f-night").addEventListener("change", function (e) { state.filters.night = e.target.checked; renderTable(); });
+    $("#f-night").addEventListener("change", function (e) { state.filters.night = e.target.checked; renderTable(); renderDay(); });
     $("#f-day").addEventListener("change", function (e) { state.filters.dayOnly = e.target.checked; renderTable(); });
-    sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); });
-    $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); });
-    $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); });
-    $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderTable(); });
+    sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); renderDay(); });
+    $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); renderDay(); });
+    $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); renderDay(); });
+    $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderTable(); renderDay(); });
 
     $("#root").addEventListener("change", function (ev) {
       var s = ev.target.closest && ev.target.closest("select.labelsel");

@@ -1,81 +1,167 @@
 # Bark Detector Offline
 
-Analyze Zoom H6 24/7 MP3 recordings for **dog barking**, to document when and how
-much a neighbour's dogs bark. Produces a JSON results file plus playable audio
-snippets for a frontend to present as evidence.
+Analyze Zoom H6 24/7 MP3 recordings for **dog barking** — to document *when*, *how
+much*, *how loud*, and (optionally) *which dog* barks. It produces a JSON results
+file plus playable audio clips for a static frontend to present as evidence for a
+noise complaint.
 
-Designed for **integrity**: original files are hashed (SHA-256) and copied into an
+Designed for **integrity**: originals are hashed (SHA-256) and copied into an
 immutable archive, recording start times come from the SD card's own filesystem
-timestamps, every detection has a listenable clip, and the whole pipeline is
-reproducible and re-runnable (idempotent).
+timestamps, every detection has a listenable clip, model parameters are recorded
+with each result, and the whole pipeline is reproducible and idempotent.
 
-## What it does
+---
 
-1. **Ingest** — reads MP3s directly from the SD card, hashes them, derives the
-   recording start time from the card's creation timestamp, and copies each file
-   into `data/archive/`.
-2. **Analyze** — streams each recording through **PANNs** (a pretrained AudioSet
-   sound-event model). Audio is **peak-normalized per window first** so quiet
-   recordings are boosted, then dog-related classes (Dog, Bark, Bow-wow, Yip,
-   Howl, Growling, Whimper) are thresholded and merged into discrete bark events.
-   Tuned for **high recall** — faint/ambiguous barks are kept and filtered later
-   by listening to the snippets.
-3. **Snippets** — a short MP3 clip (event ± padding) is cut for every event.
-4. **Export** — everything is written to `data/export/results.json`: bark events
-   (with absolute local timestamps and snippet URLs), **recording coverage and
-   gaps**, and per-day summaries (incl. night counts).
+## Table of Contents
 
-## How inference works
+- [Overview](#overview)
+- [Installation](#installation)
+- [Running the pipeline](#running-the-pipeline)
+- [How detection works (inference)](#how-detection-works-inference)
+- [Training: telling the dogs apart](#training-telling-the-dogs-apart)
+- [Publishing and hosting](#publishing-and-hosting)
+- [Output and data contract](#output-and-data-contract)
+- [Configuration reference](#configuration-reference)
+- [Scientific background and references](#scientific-background-and-references)
+- [Testing](#testing)
+- [Chain of custody](#chain-of-custody)
 
-The analyze step is the heavy part. It is designed to process arbitrarily long
-recordings (24 h+) on a CPU with flat memory and predictable progress.
+---
+
+## Overview
+
+The pipeline is a sequence of **steps** listed in `config.yml` (`run.steps`). Each
+runs in order and is independently re-runnable:
+
+| Step | What it does |
+|------|--------------|
+| `ingest` | Read MP3s from the SD card, hash them, derive the recording start time from the card's creation timestamp, copy each into `data/archive/`. |
+| `analyze` | Stream each recording through **PANNs** (a pretrained audio-event model), detect bark events, measure per-event loudness, compute a per-event embedding, and cut a playable clip. |
+| `identify` | Ingest human labels (`labels.json`), train a lightweight per-dog classifier, and predict a dog for every event. |
+| `export` | Write `data/export/results.json`: events, coverage/gaps, daily summaries, per-dog counts, and provenance. |
+| `publish` | Assemble `data/site/` (frontend + results.json + clips) — the single, curated deploy unit. |
+
+Everything is **config-driven**: the program takes no command-line arguments.
+
+---
+
+## Installation
+
+Uses conda/mamba because the audio + ML stack (`ffmpeg`, `libsndfile`, PyTorch)
+ships as native binaries that are painful via pip on Windows. A reproducible
+`environment.yml` is also part of chain-of-custody — any machine can re-verify.
+
+```bash
+mamba env create -f environment.yml
+mamba activate bark-detector-offline
+python -c "import torch, panns_inference, librosa, soundfile, sklearn; print('ok')"
+```
+
+`ffmpeg` is installed into the env by conda — no separate install needed.
+
+### The PANNs model checkpoint (one-time, ~312 MB)
+
+On first `analyze`, `panns_inference` downloads its checkpoint. It shells out to
+`wget`; if you have an old GnuWin32 `wget` on PATH, its TLS will fail against
+zenodo and leave a **truncated/0-byte file**, which later crashes with an opaque
+`torch` error. Fetch it manually with a modern downloader instead:
+
+```powershell
+curl.exe -L -o "$env:USERPROFILE\panns_data\Cnn14_DecisionLevelMax.pth" `
+  "https://zenodo.org/record/3987831/files/Cnn14_DecisionLevelMax_mAP%3D0.385.pth?download=1"
+```
+
+The complete file is **327,428,481 bytes**. Verify it loads:
+`python -c "import torch; torch.load(r'%USERPROFILE%/panns_data/Cnn14_DecisionLevelMax.pth', map_location='cpu'); print('ok')"`.
+On flaky connections use `curl.exe -C -` (resume) in a loop. This is a one-time
+step; afterwards the pipeline runs fully offline.
+
+### Configure before first use
+
+Edit `config.yml` — at minimum set `run.source` (recordings folder / SD card),
+`paths.root` (where data lives, outside the git repo), `timezone` (must match the
+recorder's clock), and the dog roster under `identification.dogs`.
+
+---
+
+## Running the pipeline
+
+```bash
+python -m barkdetect
+```
+
+That runs whatever is in `run.steps`. For the normal every-few-days operation:
+
+```yaml
+run:
+  source: "D:/Projects/dog_bark/temp_input"   # recordings only — no other mp3s here
+  steps: [ingest, analyze, identify, export, publish]
+```
+
+Common variations:
+
+- Only rebuild the JSON/site: `steps: [export, publish]`
+- Re-run detection without re-copying: `steps: [analyze, identify, export]`
+- Re-run identification after labeling: `steps: [identify, export, publish]`
+- Alternate config file: `BARKDETECT_CONFIG=other.yml python -m barkdetect`
+
+Re-running is safe: files already ingested (same SHA-256) are skipped, and only
+unprocessed recordings are analyzed. The database auto-migrates (adds new columns)
+when you upgrade, so you never need to delete it.
+
+### Logging & progress
+
+Analysis logs each stage with timing and a **realtime factor** (audio processed
+per wall-clock second) so remaining time is predictable — e.g. `ZOOM0007.MP3 done
+- 128 events in 12m23s (34.8x realtime)` means a 7 h file takes ~12 min. A live
+`tqdm` bar shows per-file percentage and ETA. Configure via the `logging` block;
+`log_file` doubles as a timestamped processing audit trail.
+
+---
+
+## How detection works (inference)
+
+The `analyze` step is the heavy part. It processes arbitrarily long recordings
+(24 h+) on a CPU with **flat memory** and **predictable progress**.
 
 **1. Single-pass streaming decode.** A recording is never loaded whole. `ffmpeg`
 decodes the MP3 in one forward pass to mono 32 kHz float32 PCM (PANNs' required
 format) and pipes it out; `audio.stream_windows` reads that pipe in fixed
-`audio.window_seconds` chunks (default 60 s). Memory stays constant regardless of
-file length — a 24 h file uses the same RAM as a 1 min file.
+`window_seconds` chunks (default 60 s). RAM stays constant regardless of length.
 
 **2. Per-window normalization.** Each window is peak-normalized before detection
 (`audio.normalize_window`): quiet audio is boosted toward `target_peak`, capped by
-`max_gain`, and a `noise_floor` guard leaves near-silent windows untouched so
-background hiss is not amplified into false positives.
+`max_gain`, with a `noise_floor` guard so near-silence isn't amplified into false
+positives. This only feeds detection; loudness is measured separately (step 4).
 
-**3. Model inference (the bottleneck).** Each window is run through the PANNs
-`Cnn14_DecisionLevelMax` Sound Event Detection model, which returns a frame-level
-probability (~100 frames/s) for all 527 AudioSet classes. This forward pass is
-what makes analysis slow on CPU; everything else is negligible. For each frame we
-keep only the **max probability across the configured `dog_classes`** and which
-dog class won.
+**3. Model inference (the bottleneck).** Each window runs through the PANNs
+`Cnn14_DecisionLevelMax` **Sound Event Detection** model, which returns a
+frame-level probability (~100 frames/s) for all 527 AudioSet classes. Per frame we
+keep the **max probability across the configured `dog_classes`** and which class
+won. See [Scientific background](#scientific-background-and-references).
 
-**4. Timeline assembly & event extraction.** Per-window frame scores are
-concatenated into one continuous timeline for the whole file. `detect.extract_events`
-then: thresholds frames at `detection.threshold` (low = high recall), merges hot
-runs closer than `merge_gap_seconds`, and drops anything shorter than
-`min_event_seconds`. Each surviving run becomes one bark **event** with peak/mean
-confidence, its dominant class, and start/end offsets. Because the timeline is
-continuous, a bark straddling a window boundary is still detected as one event.
-In parallel, a raw-loudness envelope (measured from the **un-normalized** audio,
-so it reflects true relative volume) is captured on the same timeline, and each
-event gets the peak loudness within its span — later turned into
-`intensity_relative` (0–1) and `intensity_dbfs` at export (see `intensity`).
+**4. Timeline assembly, events & loudness.** Per-window frame scores are
+concatenated into one continuous timeline. `detect.extract_events` thresholds at
+`detection.threshold` (low = high recall), merges hot runs closer than
+`merge_gap_seconds`, and drops runs shorter than `min_event_seconds`. Each
+survivor becomes one **event**. Because the timeline is continuous, a bark
+straddling a window boundary is still one event. In parallel, a raw-loudness
+envelope from the **un-normalized** audio is captured on the same timeline; each
+event gets its peak loudness → `intensity_relative` (0–1) and `intensity_dbfs`.
 
-**5. Absolute timing, snippets, provenance.** Event offsets are added to the
-recording's start time to get absolute UTC/local timestamps. A padded MP3 clip is
-cut per event for later listening — by default its loudness is normalized
-(`snippets.normalize`) so faint barks in quiet recordings are audible, while the
-archived original is left untouched. The exact parameter set used (including
-whether clips were loudness-boosted) is stored with the recording (see
-`parameters` in `results.json`) so results are reproducible.
+**5. Absolute timing, embeddings, snippets, provenance.** Offsets are added to the
+recording start for absolute UTC/local times. A per-event **embedding** is computed
+for identification (see [Training](#training-telling-the-dogs-apart)). A padded MP3
+clip is cut per event (loudness-normalized so faint barks are audible; the archived
+original is never modified). The exact parameters used are stored with the
+recording.
 
-Latency scales with audio length, not file count. Tuning knobs: raise
-`window_seconds` to reduce per-call overhead, or (not yet wired) increase
-`torch` CPU threads.
+Latency scales with audio length, not file count. Tuning: raise `window_seconds`
+to reduce per-call overhead.
 
 ### Where each per-event feature is computed
 
-Detection and feature calculation happen across three layers. Raw facts are
-produced at detection time, absolute/persisted facts at analyze time, and
+Raw facts are produced at detection time, absolute/persisted facts at analyze time,
 derived/presentational facts at export time (so they can be recomputed without
 re-running the model).
 
@@ -85,9 +171,7 @@ re-running the model).
       ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ score_recording()                                        detect.py    │
-│                                                                       │
 │  stream_windows() ──▶ per 60s window: raw float32 samples             │
-│                                   │                                   │
 │                     ┌─────────────┴──────────────┐                    │
 │                     ▼                             ▼                    │
 │            normalize_window()             _frame_energy(raw)          │
@@ -100,283 +184,370 @@ re-running the model).
                         ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ extract_events()   threshold ▸ merge ▸ min-duration    detect.py      │
-│                                                                       │
-│  one event per surviving run, features:                               │
-│    offset_start_sec, offset_end_sec, duration_sec  ◀ timeline         │
+│    offset_start/end_sec, duration_sec              ◀ timeline         │
 │    peak_conf, mean_conf, top_class                 ◀ scores           │
 │    intensity_raw                                   ◀ loudness         │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ analyze()                                                analyze.py    │
-│    + abs_start_utc / abs_end_utc   (recording start + offset)         │
-│    + snippet clip (ffmpeg)  ▸ snippet_path                            │
+│    + abs_start/end_utc, event_key, embedding, snippet_path            │
 │    ▸ persist event row to SQLite                                      │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ build_export()                                           export.py     │
-│    + abs_start_local, night                                           │
-│    + intensity_relative (0..1), intensity_dbfs   (from intensity_raw) │
-│    + snippet_url                                                      │
-│    aggregates: daily_summary, coverage, gaps   [future: hourly heatmap]│
+│ identify()  (labels.json → train → predict)             identify.py   │
+│    + dog_label, dog_confidence, dog_label_source                      │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ build_export()                                           export.py    │
+│    + abs_start_local, night, intensity_relative/dbfs, snippet_url     │
+│    aggregates: daily_summary (+by_dog), coverage, gaps                │
 └─────────────────────────────────────────────────────────────────────┘
                                 ▼
                          results.json
 ```
 
-### Logging & progress
+---
 
-Analysis logs each stage and its timing, plus a **realtime factor** (audio time
-processed per wall-clock second) so remaining time is predictable — e.g.
-`ZOOM0007.MP3 done — 128 events in 12m23s (34.8x realtime)` means a 7 h file
-takes ~12 min. A live per-file progress bar (`tqdm`) shows percentage and ETA.
+## Training: telling the dogs apart
 
-Configure via the `logging` block in `config.yml`:
+Several dogs may be involved, and you may want per-dog counts. This is **individual
+identification by voice** — a hard, inherently imperfect problem (see the
+[references](#scientific-background-and-references)). The design reflects that:
 
-```yaml
-logging:
-  level: INFO            # DEBUG adds a per-window "at HH:MM:SS / HH:MM:SS" position line
-  progress_bar: true     # live tqdm bar; set false for headless/cron/redirected runs
-  log_file: data/processing.log  # timestamped audit trail (appended); null = console only
-```
+- **No fine-tuning, no training from scratch.** The detector is reused untouched.
+  We add a *separate* identity path: a frozen **embedding** (fingerprint) per bark
+  + a **lightweight classifier** trained on a handful of your own labels
+  ("few-shot"). This works with dozens of examples, trains in seconds on CPU, and
+  the embedding model is swappable without touching anything else.
+- **You provide the ground truth.** The residents know the dogs, so labels come
+  from listening to clips in the website's *training mode* — the most defensible
+  possible source.
 
-The `log_file` doubles as a processing audit trail for evidence: a timestamped
-record of when each file was analyzed and with what result.
+### The workflow
 
-## Setup (conda / mamba)
+1. **Embeddings** — `analyze` computes a per-event embedding (config
+   `identification.embedding`, default `librosa`: MFCC + spectral + ZCR features).
+   Stored per event; no extra model download.
+2. **Label in the website** — turn on *training mode*, play a clip, pick the dog
+   from a dropdown (roster from `identification.dogs`) or `Unsure` / `Multiple` /
+   `Not a dog`. Labels persist in the browser.
+3. **Export `labels.json`** — one click downloads
+   `{ "labels": { "<event.key>": "Socke", ... } }`. Drop it at
+   `identification.labels_path` (default `data/labels.json`).
+4. **`identify` step** — ingests the labels, trains the classifier once there are
+   ≥ `min_labels_per_dog` labels for ≥ 2 dogs, saves the model, and predicts a dog
+   for **every** event. Human labels always win; the rest get a *predicted* dog +
+   confidence.
+5. **Re-export / publish** — `dog_label`, `dog_confidence`, and `dog_label_source`
+   land in `results.json`; the frontend shows *confirmed* vs *suggested* distinctly.
+
+Labels are keyed by a **stable `event_key`** (`<sha12>_<offsetms>`), so they
+survive database rebuilds and re-runs.
+
+### Model choice and expectations
+
+- Start with `embedding: librosa` (no download). If dogs don't separate well,
+  switch to `embedding: panns` (richer, needs the AudioTagging checkpoint) or
+  `embedding: aves` (animal-tuned, new dependency) — **no other code changes**.
+- Accuracy is expected to be imperfect (literature ≈ 50–70 % for individual bark
+  ID). That's acceptable because a human confirms labels and predictions are shown
+  as *suggested*.
+
+### Evidence framing (important)
+
+Human labels are authoritative ("a resident identified this as Socke"); model
+predictions are **advisory** and must be presented as *suggested, subject to
+review*. Never assert an unqualified per-dog count. The core evidence
+(timestamps, counts, loudness, audible clips) stands on its own; per-dog
+attribution is a reviewed layer on top.
+
+---
+
+## Publishing and hosting
+
+`publish` assembles a self-contained static bundle in `site_dir` (`data/site`)
+containing **only** public material — `frontend/index.html`, `results.json`, and
+`snippets/`. It never includes the original recordings, the database, or logs.
+This isolation is deliberate: serving the raw `data/` directory would expose hours
+of original audio and the DB.
+
+Preview locally over HTTP (the page uses `fetch`, so `file://` won't work):
 
 ```bash
-mamba env create -f environment.yml
-mamba activate bark-detector-offline
-# quick check
-python -c "import torch, panns_inference, librosa, soundfile; print('ok')"
+python -m http.server -d data/site 8000   # open http://localhost:8000
 ```
 
-`ffmpeg` is installed into the env by conda — no separate install needed. The
-PANNs model checkpoint (~300 MB) downloads automatically on first `analyze`.
+Snippets sync incrementally, so re-publishing after a batch only copies new clips.
+To deploy, upload `data/site/` to a static host. Because this is a neighbor's
+personal audio (**GDPR** applies), prefer an access-controlled, EU-hosted target
+(e.g. a small VPS with HTTPS + basic-auth) over a public URL, and check with your
+lawyer before putting it online.
 
-Edit `config.yml` before first use — at minimum set `run.source` (the SD card
-path), `timezone` to match the recorder's clock, and confirm the detection
-`threshold`.
+---
 
-## Usage
-
-The pipeline takes **no command-line arguments** — everything is configured in
-`config.yml`. Set `run.source` and `run.steps`, then run:
-
-```bash
-python -m barkdetect
-```
-
-`run.steps` controls what happens, in order. For the normal every-few-days
-operation, leave it as:
-
-```yaml
-run:
-  source: "E:/DCIM"
-  steps: [ingest, analyze, export, publish]
-```
-
-To only re-export: `steps: [export]`. To re-analyze without re-copying:
-`steps: [analyze, export]`. To use an alternate config file:
-
-```bash
-BARKDETECT_CONFIG=other.yml python -m barkdetect
-```
-
-Re-running is safe: files already ingested (same SHA-256) are skipped, and only
-unprocessed recordings are analyzed.
-
-## Output layout
+## Output and data contract
 
 ```
 data/
   archive/            immutable copies of the original MP3s
   snippets/<hash>/    per-event .mp3 clips (referenced by results.json)
   barks.db            SQLite source of truth
+  models/             trained dog classifier
   export/results.json frontend input
+  site/               published bundle (deploy unit)
+  labels.json         labels exported from the website (input to identify)
 ```
 
-The full `results.json` contract is documented in
+The full `results.json` contract (schema v2) is documented in
 [`docs/results-schema.md`](docs/results-schema.md), with a real example in
-[`docs/sample_results.json`](docs/sample_results.json). The frontend design brief
-(a prompt for claude.ai) is in [`docs/design-brief.md`](docs/design-brief.md).
+[`docs/sample_results.json`](docs/sample_results.json) and the `labels.json`
+format. The frontend design brief (prompt for claude.ai, incl. training mode) is
+[`docs/design-brief.md`](docs/design-brief.md).
 
-### Publishing the frontend
+---
 
-The `publish` step assembles a self-contained static bundle in `site_dir`
-(`data/site` by default) containing **only** public material: `frontend/index.html`,
-the exported `results.json`, and the `snippets/` clips — never the original
-recordings, the database, or logs. It's the single deploy unit.
+## Configuration reference
 
-Serve/preview it locally over HTTP (the page uses `fetch`, so `file://` won't
-work):
-
-```bash
-python -m http.server -d data/site 8000   # then open http://localhost:8000
-```
-
-Snippets are synced incrementally, so re-running `publish` after a new batch
-only copies new clips. To deploy, upload `data/site/` to a static host (see the
-hosting notes / deploy step).
-
-`results.json` contains: `schema_version`, `parameters` (the
-model/normalization/detection settings used — recorded for reproducibility),
-`recordings`, `coverage`, `gaps`, `daily_summary`, and `events` (each with `abs_start_local`, `class`, `peak_conf`,
-`night`, `intensity_relative` (0–1, loudest bark in scope = 1), `intensity_dbfs`
-(absolute loudness), `snippet_url`). Each recording also carries the exact
-`parameters` that produced its events. Serve `data/export/` and `data/snippets/` as static files
-to the frontend.
-
-## Configuration reference (`config.yml`)
-
-Everything is set in `config.yml` — the pipeline takes no CLI arguments. Below is
-every parameter, its default, and what it does. Paths are relative to the project
-root unless absolute. 🔧 marks the settings you are most likely to tune;
-⚠️ marks settings you should normally leave alone.
+Everything is set in `config.yml`. Below is every parameter, its default, and what
+it does. Paths resolve against `paths.root` unless absolute. 🔧 = likely to tune;
+⚠️ = normally leave alone.
 
 ### `run` — what runs
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `source` 🔧 | `E:/DCIM` | Folder/SD-card path to ingest from. Used only by the `ingest` step. Point it at the card itself (timestamps live there). |
-| `steps` 🔧 | `[ingest, analyze, export]` | Which stages run, in order. E.g. `[export]` to only rebuild JSON, `[analyze, export]` to re-run detection without re-copying. |
+| `source` 🔧 | `E:/DCIM` | Folder/SD-card path to ingest from. Keep it to recordings only. |
+| `steps` 🔧 | `[ingest, analyze, identify, export, publish]` | Which stages run, in order. |
 
 ### `paths` — where data lives
 
-The four data paths below are resolved against `root`; absolute values are used
-as-is. Set `root` to your project/data directory to keep data **out of the git
-repo**. The `archive`, `snippets`, and `export` dirs are auto-excluded from
-ingest scans, so the pipeline never re-ingests its own output even when those
-dirs live inside `run.source`.
+Resolved against `root`; absolute values used as-is. `archive`, `snippets`, and
+`export` are auto-excluded from ingest scans, so the pipeline never re-ingests its
+own output even when those live inside `run.source`.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `root` 🔧 | `D:/Projects/dog_bark` | Base dir the paths below resolve against. `null`/empty = the repo dir (where `config.yml` lives). |
+| `root` 🔧 | `D:/Projects/dog_bark` | Base dir the paths below resolve against. `null` = the repo dir. |
 | `archive_dir` | `data/archive` | Immutable copies of the original MP3s. |
-| `snippets_dir` | `data/snippets` | Per-event audio clips (served to the frontend). |
+| `snippets_dir` | `data/snippets` | Per-event audio clips. |
 | `db_path` | `data/barks.db` | SQLite source of truth. |
 | `export_dir` | `data/export` | Where `results.json` is written. |
-| `site_dir` | `data/site` | The `publish` bundle: `index.html` + `results.json` + `snippets/` — the deploy unit. |
+| `site_dir` | `data/site` | The `publish` bundle — the deploy unit. |
 
 ### `timezone`
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `timezone` 🔧 | `Europe/Berlin` | IANA zone of the recorder **and** this PC. Must match the H6's clock — used to turn SD-card FAT timestamps into correct local/UTC times. |
+| `timezone` 🔧 | `Europe/Berlin` | IANA zone of the recorder **and** this PC. Must match the H6's clock — turns SD-card FAT timestamps into correct times. |
 
 ### `model` — the detector
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `device` 🔧 | `cpu` | `cpu` or `cuda` (needs a CUDA-enabled PyTorch + GPU). |
-| `name` | `PANNs Cnn14_DecisionLevelMax` | Label stored with results; not a switch to another model. |
+| `device` 🔧 | `cpu` | `cpu` or `cuda`. |
+| `name` | `PANNs Cnn14_DecisionLevelMax` | Label stored with results. |
 | `version` | `audioset` | Label stored with results for provenance. |
-| `checkpoint_path` | `null` | `null` = use PANNs' default location (`~/panns_data/...`). Set an explicit path to pin the checkpoint file. |
+| `checkpoint_path` | `null` | `null` = PANNs' default location (`~/panns_data/...`). |
 
 ### `audio` — decoding & windowing
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `sample_rate` ⚠️ | `32000` | PANNs' required input rate. Do **not** change — other values break detection quality. |
-| `window_seconds` 🔧 | `60` | Streaming window size. Larger = fewer model calls (slightly faster) but more RAM per window. |
-| `min_window_seconds` | `1.0` | Trailing windows shorter than this are skipped (too short for the model). |
+| `sample_rate` ⚠️ | `32000` | PANNs' required input rate. Do **not** change. |
+| `window_seconds` 🔧 | `60` | Streaming window size. Larger = fewer model calls, more RAM/window. |
+| `min_window_seconds` | `1.0` | Trailing windows shorter than this are skipped. |
 
-### `normalization` — pre-detection gain (applied per window)
+### `normalization` — pre-detection gain (per window)
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enabled` 🔧 | `true` | Turn normalization on/off. Off = raw levels (useful to prove detections don't depend on boosting). |
-| `target_peak` 🔧 | `0.9` | Windows are scaled so their peak reaches this (0–1). |
-| `max_gain` 🔧 | `20.0` | Ceiling on amplification (linear). Prevents over-boosting faint windows. |
-| `noise_floor` 🔧 | `0.005` | If a window's peak is below this it's treated as silence and left untouched (stops noise being amplified into false positives). |
+| `enabled` 🔧 | `true` | On/off. Off = raw levels (useful to prove detections don't depend on boosting). |
+| `target_peak` 🔧 | `0.9` | Scale each window so its peak reaches this (0–1). |
+| `max_gain` 🔧 | `20.0` | Ceiling on amplification (linear). |
+| `noise_floor` 🔧 | `0.005` | Below this peak, treat as silence and don't amplify. |
 
 ### `detection` — bark events
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `threshold` 🔧 | `0.15` | Frame score to count as a dog sound. **Lower = higher recall** (more, but noisier). Raise for higher precision. |
+| `threshold` 🔧 | `0.15` | Frame score to count as a dog sound. **Lower = higher recall.** |
 | `min_event_seconds` 🔧 | `0.15` | Discard events shorter than this. |
-| `merge_gap_seconds` 🔧 | `0.4` | Merge two hot spans separated by less than this into one event. |
-| `dog_classes` 🔧 | `Dog, Bark, Bow-wow, Yip, Howl, Growling, Whimper (dog)` | AudioSet class names counted as barking. Names must match PANNs spelling exactly. |
+| `merge_gap_seconds` 🔧 | `0.4` | Merge hot spans separated by less than this. |
+| `dog_classes` 🔧 | `Dog, Bark, Bow-wow, Yip, Howl, Growling, Whimper (dog)` | AudioSet class names counted as barking (exact spelling). |
 
 ### `intensity` — per-event loudness
 
-Loudness is measured from the **raw, un-normalized** audio at ~10 ms resolution.
-The absolute value is stored; the `intensity_relative` (0–1) in `results.json` is
-derived, with `1.0` = the loudest bark in scope. Each event also carries
-`intensity_dbfs` (absolute), which stays comparable across files.
+Measured from the **raw, un-normalized** audio at ~10 ms resolution.
+`intensity_relative` (0–1, 1 = loudest in scope) is derived; `intensity_dbfs` is
+absolute and comparable across files.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `metric` 🔧 | `rms` | `rms` (perceived energy) or `peak` (max amplitude within the bark). |
-| `scope` 🔧 | `per_file` | `per_file` = loudest bark in *each* recording is 1.0; `global` = loudest bark across *all* recordings is 1.0 (comparable between files). |
+| `metric` 🔧 | `rms` | `rms` (perceived energy) or `peak` (max amplitude). |
+| `scope` 🔧 | `per_file` | `per_file` = loudest bark in each recording is 1.0; `global` = across all files. |
 
-> Note: intensity reflects what the microphone captured (distance, mic gain, and
-> the H6's limiter all affect it), not the dog's true loudness. In `per_file`
-> scope even a quiet night's loudest bark reads 1.0 — use `intensity_dbfs` for
-> absolute comparison.
+> Intensity reflects what the mic captured (distance, gain, limiter), not the dog's
+> true loudness. In `per_file` scope even a quiet night's loudest bark reads 1.0 —
+> use `intensity_dbfs` for absolute comparison.
+
+### `identification` — per-dog training
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` 🔧 | `true` | Compute embeddings and run the `identify` step. |
+| `embedding` 🔧 | `librosa` | Fingerprint backend: `librosa` (no download) \| `panns` \| `aves`. |
+| `classifier` 🔧 | `logreg` | `logreg` (logistic regression) or `knn`. |
+| `min_labels_per_dog` 🔧 | `8` | Need ≥ this many labels for ≥ 2 dogs before training. |
+| `labels_path` | `data/labels.json` | Where the website's exported labels are read from. |
+| `model_path` | `data/models/dog_clf.joblib` | Where the trained classifier is saved. |
+| `dogs` 🔧 | — | Roster of real dog names — dropdown options and classifier classes. |
 
 ### `ingest` — copy & identity
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `file_extensions` | `[".mp3"]` | Which files to pick up from `source`. |
+| `file_extensions` | `[".mp3"]` | Which files to pick up. |
 | `timestamp_source_label` | `sdcard_ctime` | Recorded with each file to document how its start time was derived. |
-| `hash_prefix_len` | `12` | Length of the SHA-256 prefix used in archive filenames. |
-| `archive_name_template` | `{start}_{hash}_{name}` | Archive filename pattern. Tokens: `{start}`=recording start (local, `yymmdd_hhmm`), `{hash}`=short sha, `{name}`=original name. |
-| `hash_chunk_bytes` | `1048576` | Read block size when hashing (memory/speed tradeoff). |
-| `clock_drift_warn_seconds` 🔧 | `120` | Warn if file mtime disagrees with `start + duration` by more than this — flags a bad recorder clock or timestamps lost on copy. |
+| `hash_prefix_len` | `12` | Length of the SHA-256 prefix in archive filenames. |
+| `archive_name_template` | `{start}_{hash}_{name}` | Tokens: `{start}`=yymmdd_hhmm, `{hash}`, `{name}`. |
+| `hash_chunk_bytes` | `1048576` | Read block size when hashing. |
+| `clock_drift_warn_seconds` 🔧 | `120` | Warn if file mtime disagrees with `start + duration` by more than this. |
 
 ### `snippets` — per-event clips
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `padding_seconds` 🔧 | `2.0` | Audio context added before **and** after each event. |
-| `quality` | `5` | `libmp3lame` VBR quality (0 = best/large … 9 = worst/small). |
-| `codec` | `libmp3lame` | ffmpeg audio codec for the clip. |
-| `channels` | `1` | Snippet channel count (mono). |
-| `extension` | `mp3` | Clip file extension. |
-| `name_template` 🔧 | `{date}_{time}_{ms}_{dbfs}` | Clip filename (under a per-recording `<hash>/` folder). Tokens: `{date}`=ddmmyy, `{time}`=hhmmss (bark's local time), `{ms}`=offset in file (keeps names unique), `{dbfs}`=loudness, `{intensity}`=linear amplitude, `{hash}`. |
-| `normalize` 🔧 | `true` | Loudness-normalize clips so faint barks are audible on review. Only affects the listening clips — the archived original is never modified. Recorded in `results.json` provenance. |
-| `normalize_target_lufs` 🔧 | `-16.0` | EBU R128 integrated loudness target for `loudnorm` (higher = louder). |
+| `padding_seconds` 🔧 | `2.0` | Audio context before **and** after each event. |
+| `quality` | `5` | `libmp3lame` VBR quality (0 best/large … 9 worst/small). |
+| `codec` | `libmp3lame` | ffmpeg audio codec. |
+| `channels` | `1` | Channel count (mono). |
+| `extension` | `mp3` | Clip extension. |
+| `name_template` 🔧 | `{date}_{time}_{ms}_{dbfs}` | Tokens: `{date}`=ddmmyy, `{time}`=hhmmss, `{ms}`, `{dbfs}`, `{intensity}`, `{hash}`. |
+| `normalize` 🔧 | `true` | Loudness-normalize clips so faint barks are audible. Original never modified. |
+| `normalize_target_lufs` 🔧 | `-16.0` | EBU R128 integrated loudness target. |
 
 ### `coverage` — timeline & gaps
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `merge_gap_seconds` 🔧 | `5.0` | Recordings within this gap are treated as contiguous (so H6 file-splits don't look like gaps). |
-| `night_start_hour` 🔧 | `22` | Local hour the "night" window begins (for night bark counts). |
+| `merge_gap_seconds` 🔧 | `5.0` | Recordings within this gap are treated as contiguous (H6 file-splits). |
+| `night_start_hour` 🔧 | `22` | Local hour the night window begins. |
 | `night_end_hour` 🔧 | `6` | Local hour the night window ends. |
 
-### `export`
+### `export` & `logging`
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `filename` | `results.json` | Output file written into `export_dir`. |
+| `export.filename` | `results.json` | Output file written into `export_dir`. |
+| `logging.level` 🔧 | `INFO` | `DEBUG` \| `INFO` \| `WARNING` (`DEBUG` adds per-window position). |
+| `logging.progress_bar` 🔧 | `true` | Live tqdm bar; `false` for headless/cron. |
+| `logging.log_file` | `data/processing.log` | Appended audit trail; `null` = console only. |
 
-### `logging`
+---
 
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `level` 🔧 | `INFO` | `DEBUG` \| `INFO` \| `WARNING`. `DEBUG` adds a per-window position line. |
-| `progress_bar` 🔧 | `true` | Live tqdm bar per file. Set `false` for headless/cron/redirected runs. |
-| `log_file` | `data/processing.log` | Appended, timestamped audit trail. `null` = console only. |
+## Scientific background and references
 
-## Tests
+The pipeline combines several well-established techniques. This section explains
+the concepts and cites the sources.
 
-Pure logic (no ffmpeg/model needed):
+### Audio event detection (the detector)
+
+Barks are found with **PANNs** — *Pretrained Audio Neural Networks* [1] — a family
+of CNNs trained on **AudioSet** [2], Google's ontology of 527 sound classes with
+~2 M human-labeled clips. We use `Cnn14_DecisionLevelMax`, a *Sound Event
+Detection* (SED) variant: rather than one label per clip, it outputs **frame-level**
+class probabilities (~100 frames/s), so we know not just *whether* but *when* a
+dog sound occurs. Internally the model converts audio to a **log-mel spectrogram**
+(a time–frequency image on the perceptual mel scale) and a CNN classifies it. We
+threshold and merge the frame-level dog-class scores into discrete events. Using a
+large pretrained model is a form of **transfer learning** — leveraging AudioSet's
+scale instead of training a bark detector from scratch.
+
+### Loudness measurement
+
+Detection confidence is *not* loudness, so loudness is measured separately from the
+**raw, un-normalized** audio. We use **RMS** (root-mean-square) energy — a standard
+proxy for perceived loudness — reported in **dBFS** (decibels relative to full
+scale; 0 dBFS = maximum, negative = quieter). Snippet clips are optionally
+loudness-normalized with **EBU R128 / ITU-R BS.1770** loudness normalization
+(`loudnorm`, targets **LUFS** — Loudness Units Full Scale) [3] so faint barks are
+audible without distorting the archived original.
+
+### Per-dog identification (training)
+
+Telling individuals apart by voice relies on **vocal individuality** — animal calls
+carry individual acoustic signatures. Studies show dog barks are individually
+discriminable, though imperfectly (≈ 52 % individual recognition with classic
+features) [4]. Recent work fine-tunes self-supervised **speech** models (e.g.
+Wav2Vec2) for bark tasks including individual recognition [5], and dedicated
+methods use contrastive learning for individual animal ID [6].
+
+Our approach is the pragmatic, low-data recipe: a **frozen feature extractor** turns
+each bark into a fixed-length **embedding**, and a small classifier is trained on a
+few human labels (**few-shot** learning) [10]. The default embedding uses **MFCCs**
+(Mel-Frequency Cepstral Coefficients) — a compact description of spectral timbre
+widely used in audio ML — plus spectral and zero-crossing statistics, computed with
+`librosa` [7]. Better, animal-specific embeddings can be swapped in without other
+changes: **AVES** (self-supervised animal vocalization encoder) [8], **Perch**
+(a bioacoustics foundation model designed for few-shot linear probing) [9], or
+**NatureLM-audio** (an audio-language model that even does individual counting)
+[11]. We deliberately do **not** fine-tune the detector: it needs far more labeled
+data and risks degrading detection.
+
+### References
+
+1. Kong et al., *PANNs: Large-Scale Pretrained Audio Neural Networks for Audio
+   Pattern Recognition*, IEEE/ACM TASLP 2020. https://arxiv.org/abs/1912.10211
+2. Gemmeke et al., *AudioSet: An Ontology and Human-Labeled Dataset for Audio
+   Events*, ICASSP 2017. https://research.google/pubs/pub45857/
+3. EBU R128 / ITU-R BS.1770 loudness normalization.
+   https://tech.ebu.ch/docs/r/r128.pdf
+4. *Automatic individual dog recognition based on the acoustic properties of its
+   barks*, J. Intelligent & Fuzzy Systems 2018.
+   https://dl.acm.org/doi/abs/10.3233/JIFS-169509
+5. *Towards Dog Bark Decoding: Leveraging Human Speech Processing for Automated
+   Bark Classification*, 2024. https://arxiv.org/abs/2404.18739
+6. *Acoustic identification of individual animals with hierarchical contrastive
+   learning*, 2024. https://arxiv.org/abs/2409.08673
+7. McFee et al., *librosa: Audio and Music Signal Analysis in Python*, 2015.
+   https://librosa.org
+8. Hagiwara, *AVES: Animal Vocalization Encoder based on Self-Supervision*, 2022.
+   https://arxiv.org/abs/2210.14493
+9. *Perch 2.0* bioacoustics foundation model, 2025.
+   https://arxiv.org/abs/2512.03219
+10. *Few-shot Bioacoustic Event Detection* (DCASE 2022).
+    https://arxiv.org/abs/2207.07911
+11. *NatureLM-audio: an Audio–Language Foundation Model for Bioacoustics*, 2024.
+    https://arxiv.org/abs/2411.07186
+
+---
+
+## Testing
+
+Pure logic (no ffmpeg/model needed) plus the identification units:
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-## Timestamp note (chain of custody)
+---
 
-Recording start is taken from the SD card's FAT creation time, which the H6
-writes in local wall-clock. This assumes the recorder's clock and this PC share
-the `timezone` set in `config.yml`. The card's modified time is also stored
-(`mtime_utc`) as a cross-check. Because the timestamp lives on the card, always
-run `ingest` against the card itself, not a manual copy.
-```
+## Chain of custody
+
+- **Timestamps** come from the SD card's FAT creation time, written by the H6 in
+  local wall-clock. This assumes the recorder's clock and this PC share the
+  configured `timezone`. The card's modified time is stored (`mtime_utc`) as a
+  cross-check, and `identify`/`ingest` warn on large clock drift. Always run
+  `ingest` against the card itself, not a manual copy.
+- **Integrity**: originals are SHA-256 hashed and copied read-only into
+  `archive/`; nothing mutates them. Snippet loudness-boosting affects only the
+  listening copy.
+- **Reproducibility**: the model, detection, normalization, intensity, and
+  identification settings that produced each result are recorded in `results.json`
+  (`parameters`) and per recording in the database.
+- **Honesty**: recording gaps are exported explicitly (silence in a gap means
+  "not recorded", not "no barking"), and per-dog predictions are marked
+  *suggested* vs human-*confirmed*.
