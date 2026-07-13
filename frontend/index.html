@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dog-barking evidence</title>
+<style>
+  :root {
+    --bg: #edeae4;
+    --paper: #f7f6f4;
+    --panel2: #f0eee9;
+    --ink: #1a1a19;
+    --muted: #6b6a66;
+    --faint: #9a9a8f;
+    --line: #e3e1dc;
+    --line2: #d8d5cf;
+    --field: #ffffff;
+    --band: #1a1a19;
+    --band-ink: #f7f6f4;
+    --band-line: #34332f;
+    --band-faint: #9a9a8f;
+    --night: #3b4a6b;
+    --night-lite: #9fb0d6;
+    --rec: #b7c0a8;
+    --hatch1: #d8d5cf;
+    --hatch2: #efece7;
+    --roi-border: #3b4a6b;
+    --roi-fill: rgba(59,74,107,0.12);
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151418;
+      --paper: #201f24;
+      --panel2: #26252b;
+      --ink: #e9e7e2;
+      --muted: #a7a49d;
+      --faint: #77746d;
+      --line: #302f35;
+      --line2: #3a383f;
+      --field: #2b2a30;
+      --band: #100f12;
+      --band-ink: #e9e7e2;
+      --band-line: #302f35;
+      --band-faint: #8b887f;
+      --hatch1: #3a383f;
+      --hatch2: #242329;
+      --roi-fill: rgba(159,176,214,0.14);
+      --roi-border: #6d7ea6;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+  }
+  a { color: var(--night); }
+  a:hover { color: var(--night-lite); }
+  .mono { font-family: var(--mono); }
+  .hatch {
+    background-image: repeating-linear-gradient(45deg, var(--hatch1) 0 4px, var(--hatch2) 4px 8px);
+  }
+  button { font-family: var(--sans); color: var(--ink); }
+
+  /* ---- states ---- */
+  #loading, #err {
+    max-width: 480px;
+    margin: 18vh auto;
+    padding: 0 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+  #err h1 { font-size: 20px; color: var(--ink); margin: 0 0 10px; }
+  #err code { font-family: var(--mono); font-size: 13px; background: var(--paper); border: 1px solid var(--line); padding: 2px 6px; border-radius: 4px; }
+  #err .detail { font-family: var(--mono); font-size: 12px; color: var(--faint); margin-top: 14px; word-break: break-all; }
+  #err button, #retry {
+    margin-top: 20px; padding: 9px 18px; border: 1px solid var(--line2);
+    background: var(--paper); border-radius: 7px; cursor: pointer; font-size: 14px;
+  }
+
+  /* ---- shell ---- */
+  #root { max-width: 1180px; margin: 0 auto; padding: 22px 22px 60px; }
+  .panel { background: var(--paper); border: 1px solid var(--line2); border-radius: 14px; margin-top: 18px; overflow: hidden; }
+  .panel.flush { padding: 0; }
+  .pad { padding: 24px 26px; }
+  h2.sec { font-size: 16px; font-weight: 600; margin: 0; }
+  .lead { font-size: 12px; color: var(--muted); }
+
+  /* ---- summary band ---- */
+  .band {
+    background: var(--band); color: var(--band-ink);
+    border-radius: 14px; display: flex; flex-wrap: wrap; align-items: stretch; overflow: hidden;
+  }
+  .band .title { padding: 20px 26px; min-width: 240px; flex: 1 1 240px; display: flex; flex-direction: column; justify-content: center; border-right: 1px solid var(--band-line); }
+  .band .eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--band-faint); }
+  .band .h1 { font-size: 20px; font-weight: 600; margin-top: 4px; }
+  .band .sub { font-size: 12px; color: #b8b5ac; margin-top: 3px; }
+  .band .stats { flex: 3 1 460px; display: grid; grid-template-columns: repeat(4, 1fr); }
+  .band .stat { padding: 20px; border-right: 1px solid var(--band-line); display: flex; flex-direction: column; justify-content: center; }
+  .band .stat:last-child { border-right: none; }
+  .band .stat .num { font-family: var(--mono); font-size: 25px; font-weight: 600; }
+  .band .stat .num.night { color: var(--night-lite); }
+  .band .stat .lbl { font-size: 10px; color: var(--band-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .warn { margin-top: 14px; padding: 10px 14px; border: 1px solid #c98a3e; background: rgba(201,138,62,0.12); border-radius: 8px; font-size: 13px; color: var(--ink); }
+
+  /* ---- two-col ---- */
+  .cols { display: grid; grid-template-columns: 400px 1fr; }
+  .cols > .cal { border-right: 1px solid var(--line); }
+
+  /* ---- calendar ---- */
+  .cal-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .cal-month + .cal-month { margin-top: 22px; }
+  .cal-month .mlabel { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .dow, .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .dow div { text-align: center; font-family: var(--mono); font-size: 10px; color: var(--faint); margin-bottom: 4px; }
+  .cell { position: relative; aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--line); background: var(--field); display: flex; flex-direction: column; padding: 5px 6px; }
+  .cell.blank { border-color: transparent; background: transparent; }
+  .cell.rec { cursor: pointer; }
+  .cell.rec:hover { border-color: var(--faint); }
+  .cell.sel { border: 2px solid var(--ink); }
+  .cell .dnum { font-family: var(--mono); font-size: 10px; }
+  .cell .cnt { flex: 1; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 17px; font-weight: 700; color: var(--ink); }
+  .cell .ndot { position: absolute; bottom: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 16px; font-size: 11px; color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .sw.line { border: 1px solid var(--line2); }
+  .sw.dot { width: 7px; height: 7px; border-radius: 50%; }
+  .sw.bar { width: 4px; height: 13px; border-radius: 2px; }
+
+  /* ---- day detail ---- */
+  .daytitle { font-size: 16px; font-weight: 600; }
+  .daysub { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .caps { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin: 16px 0 6px; }
+  .strip { position: relative; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .strip.ov { height: 40px; cursor: pointer; }
+  .strip.roi { height: 50px; }
+  .seg { position: absolute; top: 0; bottom: 0; }
+  .tick { position: absolute; }
+  .ov .tick { top: 6px; bottom: 6px; width: 2px; margin-left: -1px; }
+  .roi .tick { top: 7px; bottom: 7px; width: 4px; margin-left: -2px; border-radius: 2px; }
+  .roi-box { position: absolute; top: -1px; bottom: -1px; border: 2px solid var(--roi-border); background: var(--roi-fill); border-radius: 3px; pointer-events: none; }
+  .axis { position: relative; height: 14px; margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .axis span { position: absolute; }
+  .zoom { display: flex; align-items: center; gap: 14px; margin: 16px 0 10px; }
+  .zoom button { width: 40px; height: 40px; border: 1px solid var(--line2); background: var(--field); border-radius: 9px; font-size: 20px; line-height: 1; cursor: pointer; }
+  .zoom button:disabled { opacity: 0.4; cursor: default; }
+  .zoom .zl { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .zoom .zr { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  .evlist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .evcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); background: var(--field); border-radius: 11px; cursor: pointer; }
+  .evcard.sel { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+  .evcard.sel .evmeta { color: #b8b5ac; }
+  .evcard.sel .evnight { color: var(--night-lite); }
+  .evdot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+  .evcard .evbody { flex: 1; min-width: 0; }
+  .evtop { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .evtop .cls { font-size: 15px; font-weight: 600; }
+  .evtop .t { font-family: var(--mono); font-size: 14px; }
+  .evnight { font-family: var(--mono); font-size: 10px; color: var(--night); }
+  .evmeta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .evcard .play { background: none; border: none; cursor: pointer; font-size: 16px; color: inherit; opacity: 0.6; flex-shrink: 0; padding: 6px; }
+  .evcard .play:hover { opacity: 1; }
+  .empty { padding: 16px; text-align: center; font-size: 13px; color: var(--faint); border: 1px dashed var(--line2); border-radius: 10px; }
+
+  /* selected + audio */
+  .selpanel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--field); margin-bottom: 4px; }
+  .selpanel .r1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .selpanel .r1 .cls { font-size: 20px; font-weight: 600; }
+  .selpanel .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 16px; margin: 14px 0; }
+  .selpanel .k { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .selpanel .v { font-family: var(--mono); font-size: 16px; }
+  audio { width: 100%; margin-top: 6px; height: 40px; }
+  .clipnote { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 8px; word-break: break-all; }
+  .clipnote.bad { color: #a83a29; }
+
+  /* ---- controls + table ---- */
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 16px; font-size: 13px; }
+  .controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .controls select { font-family: var(--sans); font-size: 13px; padding: 6px 8px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 6px; }
+  .controls input[type=range] { width: 120px; accent-color: var(--night); }
+  .controls .rng { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .controls .rng .rv { font-family: var(--mono); color: var(--ink); min-width: 34px; }
+  .controls .shown { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: auto; }
+
+  table.log { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.log th { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 0 10px 8px 0; border-bottom: 1.5px solid var(--ink); cursor: pointer; white-space: nowrap; }
+  table.log th.r, table.log td.r { text-align: right; }
+  table.log th .arr { color: var(--faint); }
+  table.log td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  table.log td.mono { font-family: var(--mono); }
+  table.log tr.on td { background: var(--panel2); }
+  .clsdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 7px; vertical-align: baseline; }
+  .tag { font-family: var(--mono); font-size: 10px; color: var(--night); margin-left: 6px; }
+  .playbtn { background: none; border: 1px solid var(--line2); border-radius: 6px; width: 30px; height: 30px; cursor: pointer; font-size: 12px; color: var(--ink); }
+  .playbtn[disabled] { opacity: 0.35; cursor: default; }
+
+  /* ---- provenance ---- */
+  details.prov { }
+  details.prov > summary { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; list-style: none; }
+  details.prov > summary::-webkit-details-marker { display: none; }
+  .provgrid { margin-top: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+  .provgrid .g .gh { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin-bottom: 7px; }
+  .provgrid .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 3px 0; border-bottom: 1px dotted var(--line); }
+  .provgrid .kv .pk { color: var(--muted); }
+  .provgrid .kv .pv { font-family: var(--mono); text-align: right; word-break: break-all; }
+  .foot { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: center; margin-top: 22px; }
+
+  /* ---- responsive ---- */
+  @media (max-width: 900px) {
+    .cols { grid-template-columns: 1fr; }
+    .cols > .cal { border-right: none; border-bottom: 1px solid var(--line); }
+    .provgrid { grid-template-columns: repeat(2, 1fr); }
+    .band .stats { flex-basis: 100%; }
+  }
+  @media (max-width: 640px) {
+    #root { padding: 14px 14px 48px; }
+    .pad { padding: 18px 16px; }
+    .band .title { flex-basis: 100%; border-right: none; border-bottom: 1px solid var(--band-line); }
+    .band .stats { grid-template-columns: repeat(2, 1fr); }
+    .band .stat:nth-child(2) { border-right: none; }
+    .band .stat { border-bottom: 1px solid var(--band-line); }
+    .evlist { grid-template-columns: 1fr; }
+    .selpanel .grid4 { grid-template-columns: repeat(2, 1fr); }
+    .controls .shown { margin-left: 0; flex-basis: 100%; }
+    /* table -> cards */
+    table.log thead { position: absolute; left: -9999px; }
+    table.log, table.log tbody, table.log tr, table.log td { display: block; width: 100%; }
+    table.log tr { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; background: var(--field); }
+    table.log tr.on { background: var(--panel2); }
+    table.log td { border: none; padding: 4px 0; display: flex; justify-content: space-between; align-items: center; text-align: right; }
+    table.log td::before { content: attr(data-label); font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); text-align: left; }
+    table.log td.cls-cell { text-align: left; }
+  }
+</style>
+</head>
+<body>
+  <div id="loading">Loading evidence…</div>
+
+  <div id="err" hidden>
+    <h1>Couldn't load the evidence</h1>
+    <p>This page reads <code>results.json</code> from the same folder. It wasn't found or couldn't be parsed.</p>
+    <p class="lead">Make sure <code>results.json</code> and its <code>snippets/</code> folder are served alongside this page.</p>
+    <div class="detail" id="errDetail"></div>
+    <button id="retry">Try again</button>
+  </div>
+
+  <div id="root" hidden>
+    <header class="band" id="summary"></header>
+    <div id="warnSlot"></div>
+
+    <section class="panel flush">
+      <div class="cols">
+        <div class="cal pad" id="calWrap"></div>
+        <div class="pad" id="dayWrap"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="pad">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; gap:12px; flex-wrap:wrap;">
+          <h2 class="sec">Event log</h2>
+        </div>
+        <div class="controls" id="controls">
+          <label><input type="checkbox" id="f-night"> Night only</label>
+          <label><input type="checkbox" id="f-day"> Selected day only</label>
+          <label>Class
+            <select id="f-cls"><option value="all">All</option></select>
+          </label>
+          <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
+          <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
+          <span class="shown" id="shown"></span>
+        </div>
+        <div id="tableWrap"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="pad" id="provWrap"></div>
+    </section>
+
+    <div class="foot" id="foot"></div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  var pad2 = function (n) { return String(n).padStart(2, "0"); };
+  var DAY = 86400000;
+  var STEPS = [86400000, 21600000, 3600000, 900000, 300000];
+  var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+  var R = null;        // the results object
+  var offMin = 0;      // file timezone offset in minutes
+  var classes = [];
+  var audio = null;    // shared Audio element
+  var state = {
+    selDate: null,
+    roiCenter: null,
+    roiZoom: 2,
+    selId: null,
+    sortKey: "time",
+    sortDir: 1,
+    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0 }
+  };
+
+  /* ---------- boot ---------- */
+  function fail(detail) {
+    $("#loading").hidden = true;
+    $("#root").hidden = true;
+    var e = $("#err"); e.hidden = false;
+    $("#errDetail").textContent = detail || "";
+  }
+
+  function load() {
+    $("#err").hidden = true;
+    $("#loading").hidden = false;
+    fetch("./results.json", { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status + " " + r.statusText);
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.events) || !Array.isArray(data.recordings)) {
+          throw new Error("results.json is missing required fields (events / recordings).");
+        }
+        boot(data);
+      })
+      .catch(function (err) { fail(String(err && err.message || err)); });
+  }
+
+  $("#retry").addEventListener("click", load);
+
+  /* ---------- time helpers (offset-aware wall clock in the file's timezone) ---------- */
+  function detectOff() {
+    var cands = [];
+    if (R.recordings[0]) cands.push(R.recordings[0].start_local);
+    if (R.events[0]) cands.push(R.events[0].abs_start_local);
+    for (var i = 0; i < cands.length; i++) {
+      var m = cands[i] && cands[i].match(/([+-])(\d{2}):(\d{2})$/);
+      if (m) return (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10));
+    }
+    return 0;
+  }
+  function wall(iso) {
+    var t = Date.parse(iso) + offMin * 60000;
+    var d = new Date(t);
+    return {
+      t: t,
+      date: d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate()),
+      time: pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + ":" + pad2(d.getUTCSeconds())
+    };
+  }
+  function dayMid(dateStr) { var p = dateStr.split("-").map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); }
+  function dayLabel(dateStr) {
+    var p = dateStr.split("-").map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return WD[d.getUTCDay()] + ", " + MON[d.getUTCMonth()] + " " + p[2];
+  }
+  function msToHM(ms) { ms = Math.max(0, Math.min(DAY, ms)); return pad2(Math.floor(ms / 3600000)) + ":" + pad2(Math.floor((ms % 3600000) / 60000)); }
+  function spanLabel(ms) { return { 86400000: "24 h", 21600000: "6 h", 3600000: "1 h", 900000: "15 min", 300000: "5 min" }[ms] || ""; }
+
+  /* ---------- formatting ---------- */
+  function fmtDur(s) { return (s == null) ? "\u2014" : s.toFixed(1) + " s"; }
+  function fmtConf(c) { return (c == null) ? "\u2014" : Math.round(c * 100) + "%"; }
+  function fmtDbfs(d) { return (d == null) ? "\u2014" : d.toFixed(1) + " dBFS"; }
+  function fmtRel(r) { return (r == null) ? "\u2014" : r.toFixed(2); }
+  function intensityColor(rel) {
+    if (rel == null) return "#9a9a8f";
+    if (rel >= 0.8) return "#a83a29";
+    if (rel >= 0.5) return "#c07a34";
+    if (rel >= 0.25) return "#b09a54";
+    return "#9a9a8f";
+  }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+
+  /* ---------- derived data ---------- */
+  function covOverlapsDay(dateStr) {
+    var mid = dayMid(dateStr);
+    return R.coverage.some(function (c) { var a = wall(c.start).t - mid, b = wall(c.end).t - mid; return b > 0 && a < DAY; });
+  }
+  function daySummary(dateStr) {
+    for (var i = 0; i < R.daily_summary.length; i++) if (R.daily_summary[i].date === dateStr) return R.daily_summary[i];
+    return null;
+  }
+  function eventsOnDay(dateStr) {
+    return R.events.map(function (e) { return { e: e, w: wall(e.abs_start_local) }; }).filter(function (o) { return o.w.date === dateStr; });
+  }
+  function firstEventIdOn(dateStr) { var o = eventsOnDay(dateStr)[0]; return o ? o.e.id : null; }
+
+  function monthRange() {
+    var insts = [];
+    R.coverage.forEach(function (c) { insts.push(Date.parse(c.start), Date.parse(c.end)); });
+    R.gaps.forEach(function (g) { insts.push(Date.parse(g.start), Date.parse(g.end)); });
+    R.recordings.forEach(function (r) { if (r.start_local) { var t = Date.parse(r.start_local); insts.push(t, t + (r.duration_sec || 0) * 1000); } });
+    R.events.forEach(function (e) { if (e.abs_start_local) insts.push(Date.parse(e.abs_start_local)); });
+    R.daily_summary.forEach(function (d) { insts.push(Date.parse(d.date + "T12:00:00Z")); });
+    if (!insts.length) insts.push(Date.parse(R.generated_at) || Date.now());
+    var lo = Math.min.apply(null, insts), hi = Math.max.apply(null, insts);
+    var wlo = wall(new Date(lo).toISOString()), whi = wall(new Date(hi).toISOString());
+    var a = wlo.date.split("-").map(Number), b = whi.date.split("-").map(Number);
+    var months = [], y = a[0], m = a[1];
+    for (var guard = 0; guard < 120; guard++) {
+      months.push({ year: y, month: m });
+      if (y === b[0] && m === b[1]) break;
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return months;
+  }
+
+  /* ---------- render: summary band ---------- */
+  function renderSummary() {
+    var ds = R.daily_summary;
+    var recSec = R.coverage.reduce(function (a, c) { return a + (c.duration_sec || 0); }, 0);
+    var gapSec = R.gaps.reduce(function (a, g) { return a + (g.duration_sec || 0); }, 0);
+    var nightEvents = R.events.filter(function (e) { return e.night; }).length;
+    var cov = (recSec + gapSec) > 0 ? Math.round(recSec / (recSec + gapSec) * 100) : 100;
+    var range;
+    if (ds.length) {
+      var f = ds[0].date.split("-").map(Number), l = ds[ds.length - 1].date.split("-").map(Number);
+      range = MON[f[1] - 1] + " " + f[2] + " \u2013 " + MON[l[1] - 1] + " " + l[2] + ", " + f[0];
+    } else { range = "no events"; }
+
+    $("#summary").innerHTML =
+      '<div class="title">' +
+        '<div class="eyebrow">Acoustic detection report</div>' +
+        '<div class="h1">Dog-barking evidence</div>' +
+        '<div class="sub">' + esc(range) + ' \u00b7 ' + esc(R.timezone || "") + '</div>' +
+      '</div>' +
+      '<div class="stats">' +
+        stat(R.event_count != null ? R.event_count : R.events.length, "Detections", "") +
+        stat(nightEvents, "At night", "night") +
+        stat(R.recording_count != null ? R.recording_count : R.recordings.length, "Recordings", "") +
+        stat(cov + "%", (recSec / 3600).toFixed(1) + "h rec / " + (gapSec / 3600).toFixed(1) + "h gap", "") +
+      '</div>';
+
+    function stat(num, lbl, cls) {
+      return '<div class="stat"><span class="num ' + cls + '">' + esc(num) + '</span><span class="lbl">' + esc(lbl) + '</span></div>';
+    }
+
+    if (R.schema_version !== 1) {
+      $("#warnSlot").innerHTML = '<div class="warn">This file reports schema version <b>' + esc(R.schema_version) + '</b>; this viewer was built for version 1. Some fields may not display correctly.</div>';
+    }
+  }
+
+  /* ---------- render: calendar ---------- */
+  function renderCalendar() {
+    var months = monthRange();
+    var maxCount = Math.max.apply(null, [1].concat(R.daily_summary.map(function (d) { return d.count; })));
+    var html = '<div class="cal-head"><h2 class="sec">Calendar</h2><span class="lead">tap a recorded day</span></div>';
+    months.forEach(function (mo) {
+      var first = new Date(Date.UTC(mo.year, mo.month - 1, 1));
+      var dim = new Date(Date.UTC(mo.year, mo.month, 0)).getUTCDate();
+      var lead = (first.getUTCDay() + 6) % 7;
+      html += '<div class="cal-month"><div class="mlabel">' + MONTHS[mo.month - 1] + " " + mo.year + '</div>';
+      html += '<div class="dow">' + ["Mo","Tu","We","Th","Fr","Sa","Su"].map(function (w) { return "<div>" + w + "</div>"; }).join("") + '</div>';
+      html += '<div class="grid">';
+      for (var i = 0; i < lead; i++) html += '<div class="cell blank"></div>';
+      for (var d = 1; d <= dim; d++) {
+        var dateStr = mo.year + "-" + pad2(mo.month) + "-" + pad2(d);
+        var rec = covOverlapsDay(dateStr);
+        var sum = daySummary(dateStr);
+        var count = sum ? sum.count : 0;
+        var night = sum ? sum.night_count : 0;
+        var sel = dateStr === state.selDate;
+        var cls = "cell" + (rec ? " rec" : "") + (sel ? " sel" : "");
+        var bg = rec ? countColor(count, maxCount) : "transparent";
+        var hatch = rec ? "" : " hatch";
+        var numColor = rec ? "var(--ink)" : "var(--faint)";
+        var title = rec ? dayLabel(dateStr) + ": " + count + " detection" + (count === 1 ? "" : "s") + (night ? " (" + night + " night)" : "") : dayLabel(dateStr) + ": no recording";
+        html += '<div class="' + cls + hatch + '" style="background:' + bg + '"' +
+          (rec ? ' data-action="selectDay" data-date="' + dateStr + '"' : "") +
+          ' title="' + esc(title) + '">' +
+          '<span class="dnum" style="color:' + numColor + '">' + d + '</span>' +
+          '<span class="cnt">' + (rec && count > 0 ? count : "") + '</span>' +
+          '<span class="ndot" style="background:' + (night > 0 ? "var(--night)" : "transparent") + '"></span>' +
+        '</div>';
+      }
+      html += '</div></div>';
+    });
+    html +=
+      '<div class="legend">' +
+        '<span><i class="sw" style="background:#eadfce"></i>events (darker = more)</span>' +
+        '<span><i class="sw line hatch"></i>no recording</span>' +
+        '<span><i class="sw dot" style="background:var(--night)"></i>night</span>' +
+      '</div>';
+    $("#calWrap").innerHTML = html;
+  }
+  function countColor(c, max) {
+    if (c <= 0) return "var(--field)";
+    if (max <= 1) return "#c98a3e";
+    var f = c / max;
+    if (f >= 0.8) return "#c98a3e";
+    if (f >= 0.4) return "#dcc09a";
+    return "#eadfce";
+  }
+
+  /* ---------- render: day detail + zoom timeline ---------- */
+  function renderDay() {
+    var dateStr = state.selDate;
+    var wrap = $("#dayWrap");
+    if (!dateStr) { wrap.innerHTML = '<div class="empty">Select a day in the calendar.</div>'; return; }
+    var mid = dayMid(dateStr);
+    var sum = daySummary(dateStr);
+    var dayEvents = eventsOnDay(dateStr);
+
+    var pct = function (ms) { return Math.max(0, Math.min(DAY, ms)) / DAY * 100; };
+    var ovSegs = segsFor(mid, 0, DAY, pct);
+    var ovTicks = dayEvents.map(function (o) { return '<div class="tick" style="left:' + pct(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + '"></div>'; }).join("");
+
+    var span = STEPS[state.roiZoom];
+    var center = state.roiCenter;
+    if (center == null) center = dayEvents.length ? (dayEvents[0].w.t - mid) : DAY / 2;
+    var lo, hi;
+    if (span >= DAY) { lo = 0; hi = DAY; } else { lo = Math.max(0, Math.min(DAY - span, center - span / 2)); hi = lo + span; }
+    var rp = function (ms) { return (ms - lo) / (hi - lo) * 100; };
+    var roiSegs = segsFor(mid, lo, hi, rp);
+    var roiRaw = dayEvents.filter(function (o) { var r = o.w.t - mid; return r >= lo && r <= hi; });
+    var roiTicks = roiRaw.map(function (o) { return '<div class="tick" style="left:' + rp(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + '"></div>'; }).join("");
+
+    var summary = sum ? (sum.count + " detection" + (sum.count === 1 ? "" : "s") + " \u00b7 " + sum.night_count + " at night") : "No recording this day";
+
+    // selected event panel
+    var selEv = null;
+    for (var i = 0; i < R.events.length; i++) if (R.events[i].id === state.selId) { selEv = R.events[i]; break; }
+    var selHtml = "";
+    if (selEv && wall(selEv.abs_start_local).date === dateStr) {
+      var sw = wall(selEv.abs_start_local);
+      selHtml =
+        '<div class="selpanel">' +
+          '<div class="r1"><span class="evdot" style="background:' + intensityColor(selEv.intensity_relative) + '"></span>' +
+            '<span class="cls">' + esc(selEv.class) + '</span>' +
+            '<span class="mono" style="font-size:14px">' + sw.time + '</span>' +
+            (selEv.night ? '<span class="evnight">night</span>' : "") + '</div>' +
+          '<div class="grid4">' +
+            kv("Duration", fmtDur(selEv.duration_sec)) +
+            kv("Peak conf.", fmtConf(selEv.peak_conf)) +
+            kv("Loudness", fmtDbfs(selEv.intensity_dbfs)) +
+            kv("Rel. intensity", fmtRel(selEv.intensity_relative)) +
+          '</div>' +
+          audioHtml(selEv) +
+        '</div>';
+    }
+
+    wrap.innerHTML =
+      '<div class="daytitle">' + esc(dayLabel(dateStr)) + '</div>' +
+      '<div class="daysub">' + esc(summary) + '</div>' +
+      selHtml +
+      '<div class="caps">Full day \u2014 tap to move window</div>' +
+      '<div class="strip ov" data-action="moveRoi">' + ovSegs + ovTicks +
+        '<div class="roi-box" style="left:' + (lo / DAY * 100) + '%;width:' + ((hi - lo) / DAY * 100) + '%"></div>' +
+      '</div>' +
+      '<div class="axis"><span style="left:0">00</span><span style="left:25%">06</span><span style="left:50%">12</span><span style="left:75%">18</span><span style="right:0">24</span></div>' +
+      '<div class="zoom">' +
+        '<button data-action="zoomOut"' + (state.roiZoom <= 0 ? " disabled" : "") + '>\u2212</button>' +
+        '<button data-action="zoomIn"' + (state.roiZoom >= STEPS.length - 1 ? " disabled" : "") + '>+</button>' +
+        '<div><span class="zl">' + spanLabel(span) + '</span> <span class="zr">' + msToHM(lo) + " \u2013 " + msToHM(hi) + '</span></div>' +
+      '</div>' +
+      '<div class="strip roi">' + roiSegs + roiTicks + '</div>' +
+      '<div class="axis"><span style="left:0">' + msToHM(lo) + '</span><span style="right:0">' + msToHM(hi) + '</span></div>' +
+      '<div class="caps">Events in window</div>' +
+      (roiRaw.length ? '<div class="evlist">' + roiRaw.map(function (o) { return evCard(o.e, o.w); }).join("") + '</div>'
+                     : '<div class="empty">No events in this window \u2014 zoom out or move it.</div>');
+
+    // wire audio for the selected event
+    setupAudio(selEv);
+  }
+
+  function kv(k, v) { return '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>'; }
+  function segsFor(mid, lo, hi, proj) {
+    var out = "";
+    R.coverage.forEach(function (c) {
+      var a = wall(c.start).t - mid, b = wall(c.end).t - mid, ca = Math.max(a, lo), cb = Math.min(b, hi);
+      if (cb <= ca) return;
+      out += '<div class="seg" style="left:' + proj(ca) + '%;width:' + (proj(cb) - proj(ca)) + '%;background:var(--rec)"></div>';
+    });
+    R.gaps.forEach(function (g) {
+      var a = wall(g.start).t - mid, b = wall(g.end).t - mid, ca = Math.max(a, lo), cb = Math.min(b, hi);
+      if (cb <= ca) return;
+      out += '<div class="seg hatch" style="left:' + proj(ca) + '%;width:' + (proj(cb) - proj(ca)) + '%"></div>';
+    });
+    return out;
+  }
+  function evCard(e, w) {
+    var sel = e.id === state.selId;
+    var meta = fmtDur(e.duration_sec) + " \u00b7 " + fmtConf(e.peak_conf) + " conf \u00b7 " + fmtDbfs(e.intensity_dbfs);
+    return '<div class="evcard' + (sel ? " sel" : "") + '" data-action="selectEvent" data-id="' + e.id + '">' +
+      '<span class="evdot" style="background:' + intensityColor(e.intensity_relative) + '"></span>' +
+      '<div class="evbody"><div class="evtop"><span class="cls">' + esc(e.class) + '</span><span class="t">' + w.time + '</span>' +
+        (e.night ? '<span class="evnight">night</span>' : "") + '</div>' +
+        '<div class="evmeta">' + meta + '</div></div>' +
+      '<button class="play" data-action="playEvent" data-id="' + e.id + '" title="Play clip" aria-label="Play clip">\u25b6</button>' +
+    '</div>';
+  }
+
+  /* ---------- audio ---------- */
+  function audioHtml(e) {
+    if (!e.snippet_url) return '<div class="clipnote">No audio clip for this event.</div>';
+    return '<audio id="player" controls preload="none"></audio>' +
+      '<div class="clipnote" id="clipnote">' + esc(e.snippet_url) + '</div>';
+  }
+  function setupAudio(e) {
+    audio = $("#player");
+    if (!audio || !e || !e.snippet_url) return;
+    audio.src = e.snippet_url; // relative to this page
+    var note = $("#clipnote");
+    audio.addEventListener("error", function () {
+      if (note) { note.textContent = "Clip unavailable: " + e.snippet_url; note.className = "clipnote bad"; }
+    });
+    if (state._play) {
+      state._play = false;
+      var p = audio.play();
+      if (p && p.catch) p.catch(function () { if (note) { note.textContent = "Clip unavailable: " + e.snippet_url; note.className = "clipnote bad"; } });
+    }
+  }
+
+  /* ---------- render: table ---------- */
+  function filteredRows() {
+    var f = state.filters;
+    var rows = R.events.filter(function (e) {
+      if (f.night && !e.night) return false;
+      if (f.cls !== "all" && e.class !== f.cls) return false;
+      if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
+      if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
+      if (f.dayOnly && state.selDate && wall(e.abs_start_local).date !== state.selDate) return false;
+      return true;
+    }).map(function (e) { return { e: e, w: wall(e.abs_start_local) }; });
+
+    var k = state.sortKey, dir = state.sortDir;
+    rows.sort(function (A, B) {
+      var a, b;
+      if (k === "time") { a = A.w.t; b = B.w.t; }
+      else if (k === "class") { a = A.e.class || ""; b = B.e.class || ""; return dir * String(a).localeCompare(String(b)); }
+      else if (k === "dur") { a = A.e.duration_sec || 0; b = B.e.duration_sec || 0; }
+      else if (k === "conf") { a = A.e.peak_conf || 0; b = B.e.peak_conf || 0; }
+      else if (k === "dbfs") { a = A.e.intensity_dbfs == null ? -999 : A.e.intensity_dbfs; b = B.e.intensity_dbfs == null ? -999 : B.e.intensity_dbfs; }
+      return dir * (a < b ? -1 : a > b ? 1 : 0);
+    });
+    return rows;
+  }
+  function arr(key) { return state.sortKey === key ? (state.sortDir > 0 ? " \u25b2" : " \u25bc") : ""; }
+  function renderTable() {
+    var rows = filteredRows();
+    $("#shown").textContent = rows.length + " of " + R.events.length + " shown";
+    var head =
+      '<thead><tr>' +
+        '<th data-sort="time">Time<span class="arr">' + arr("time") + '</span></th>' +
+        '<th>Date</th>' +
+        '<th data-sort="class">Class<span class="arr">' + arr("class") + '</span></th>' +
+        '<th class="r" data-sort="dur">Dur<span class="arr">' + arr("dur") + '</span></th>' +
+        '<th class="r" data-sort="conf">Conf<span class="arr">' + arr("conf") + '</span></th>' +
+        '<th class="r" data-sort="dbfs">Loudness<span class="arr">' + arr("dbfs") + '</span></th>' +
+        '<th class="r">Rel</th>' +
+        '<th></th>' +
+      '</tr></thead>';
+    var body = rows.map(function (o) {
+      var e = o.e, on = e.id === state.selId;
+      return '<tr class="' + (on ? "on" : "") + '">' +
+        '<td class="mono" data-label="Time">' + o.w.time + '</td>' +
+        '<td class="mono" data-label="Date" style="color:var(--muted)">' + MON[parseInt(o.w.date.slice(5,7),10)-1] + " " + parseInt(o.w.date.slice(8,10),10) + '</td>' +
+        '<td class="cls-cell" data-label="Class"><span class="clsdot" style="background:' + intensityColor(e.intensity_relative) + '"></span>' + esc(e.class) + (e.night ? '<span class="tag">night</span>' : "") + '</td>' +
+        '<td class="mono r" data-label="Dur">' + fmtDur(e.duration_sec) + '</td>' +
+        '<td class="mono r" data-label="Conf">' + fmtConf(e.peak_conf) + '</td>' +
+        '<td class="mono r" data-label="Loudness">' + fmtDbfs(e.intensity_dbfs) + '</td>' +
+        '<td class="mono r" data-label="Rel">' + fmtRel(e.intensity_relative) + '</td>' +
+        '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">\u25b6</button></td>' +
+      '</tr>';
+    }).join("");
+    $("#tableWrap").innerHTML = '<div style="overflow-x:auto"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="8" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
+  }
+
+  /* ---------- render: provenance ---------- */
+  function renderProv() {
+    var p = R.parameters || {};
+    var groups = [];
+    if (p.model) groups.push(["Model", [["Name", p.model.name], ["Version", p.model.version], ["Device", p.model.device]]]);
+    if (p.detection) groups.push(["Detection", [["Threshold", p.detection.threshold], ["Min event", p.detection.min_event_seconds + " s"], ["Merge gap", p.detection.merge_gap_seconds + " s"], ["Classes", (p.detection.dog_classes || []).length]]]);
+    if (p.normalization) groups.push(["Normalization", [["Enabled", p.normalization.enabled ? "yes" : "no"], ["Target peak", p.normalization.target_peak], ["Max gain", p.normalization.max_gain + " dB"], ["Noise floor", p.normalization.noise_floor]]]);
+    if (p.audio) groups.push(["Audio", [["Sample rate", (p.audio.sample_rate / 1000) + " kHz"], ["Window", p.audio.window_seconds + " s"]]]);
+    if (p.intensity) groups.push(["Intensity", [["Metric", String(p.intensity.metric || "").toUpperCase()], ["Scope", p.intensity.scope + (p.intensity.scope === "per_file" ? " (resets per file)" : "")]]]);
+    if (p.snippets) groups.push(["Snippets", [["Normalized", p.snippets.normalized ? "yes" : "no"], ["Target", p.snippets.target_lufs + " LUFS"]]]);
+    groups.push(["Recordings", R.recordings.map(function (r) { return [r.original_filename, (r.sha256 || "").slice(0, 10) + (r.sha256 ? "\u2026" : "")]; })]);
+    groups.push(["Timestamps", [["Source", (R.recordings[0] || {}).timestamp_source || "\u2014"], ["Timezone", R.timezone]]]);
+
+    var html =
+      '<details class="prov"><summary><span class="mono">+</span> Provenance &amp; method</summary>' +
+        '<div class="provgrid">' +
+          groups.map(function (g) {
+            return '<div class="g"><div class="gh">' + esc(g[0]) + '</div>' +
+              g[1].map(function (kv) { return '<div class="kv"><span class="pk">' + esc(kv[0]) + '</span><span class="pv">' + esc(kv[1]) + '</span></div>'; }).join("") +
+            '</div>';
+          }).join("") +
+        '</div>' +
+      '</details>';
+    $("#provWrap").innerHTML = html;
+    $("#foot").textContent = "Generated " + (R.generated_at ? wall(R.generated_at).date + " " + wall(R.generated_at).time : "\u2014") + " \u00b7 schema v" + R.schema_version + " \u00b7 " + (R.timezone || "");
+  }
+
+  /* ---------- actions ---------- */
+  function selectDay(dateStr) {
+    state.selDate = dateStr;
+    state.roiCenter = null;
+    state.roiZoom = 2;
+    state.selId = firstEventIdOn(dateStr);
+    renderCalendar(); renderDay(); renderTable();
+  }
+  function selectEvent(id, play) {
+    id = parseInt(id, 10);
+    var e = null; for (var i = 0; i < R.events.length; i++) if (R.events[i].id === id) { e = R.events[i]; break; }
+    if (!e) return;
+    var d = wall(e.abs_start_local).date;
+    state.selDate = d; state.selId = id;
+    // center ROI on the event so it's visible
+    state.roiCenter = wall(e.abs_start_local).t - dayMid(d);
+    state._play = !!play;
+    renderCalendar(); renderDay(); renderTable();
+  }
+
+  function bindControls() {
+    // populate class select
+    var sel = $("#f-cls");
+    classes.forEach(function (c) { var o = document.createElement("option"); o.value = c; o.textContent = c; sel.appendChild(o); });
+
+    $("#f-night").addEventListener("change", function (e) { state.filters.night = e.target.checked; renderTable(); });
+    $("#f-day").addEventListener("change", function (e) { state.filters.dayOnly = e.target.checked; renderTable(); });
+    sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); });
+    $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); });
+    $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); });
+
+    // delegated clicks
+    $("#root").addEventListener("click", function (ev) {
+      var el = ev.target.closest("[data-action]");
+      var th = ev.target.closest("th[data-sort]");
+      if (th) {
+        var k = th.getAttribute("data-sort");
+        if (state.sortKey === k) state.sortDir *= -1; else { state.sortKey = k; state.sortDir = 1; }
+        renderTable(); return;
+      }
+      if (!el) return;
+      var a = el.getAttribute("data-action");
+      if (a === "selectDay") selectDay(el.getAttribute("data-date"));
+      else if (a === "selectEvent") selectEvent(el.getAttribute("data-id"), false);
+      else if (a === "playEvent") { ev.stopPropagation(); selectEvent(el.getAttribute("data-id"), true); }
+      else if (a === "zoomIn") { state.roiZoom = Math.min(STEPS.length - 1, state.roiZoom + 1); renderDay(); }
+      else if (a === "zoomOut") { state.roiZoom = Math.max(0, state.roiZoom - 1); renderDay(); }
+      else if (a === "moveRoi") {
+        var box = el.getBoundingClientRect();
+        var frac = (ev.clientX - box.left) / box.width;
+        state.roiCenter = Math.max(0, Math.min(DAY, frac * DAY));
+        renderDay();
+      }
+    });
+  }
+
+  /* ---------- boot ---------- */
+  function boot(data) {
+    R = data;
+    R.coverage = R.coverage || [];
+    R.gaps = R.gaps || [];
+    R.daily_summary = R.daily_summary || [];
+    R.events = R.events || [];
+    R.recordings = R.recordings || [];
+    offMin = detectOff();
+    classes = R.events.map(function (e) { return e.class; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).sort();
+
+    // default selected day: first day with events, else first recorded day, else first month day
+    if (R.daily_summary.length) state.selDate = R.daily_summary[0].date;
+    else {
+      var m = monthRange()[0];
+      for (var d = 1; d <= 31 && !state.selDate; d++) { var ds = m.year + "-" + pad2(m.month) + "-" + pad2(d); if (covOverlapsDay(ds)) state.selDate = ds; }
+      if (!state.selDate) state.selDate = m.year + "-" + pad2(m.month) + "-01";
+    }
+    state.selId = firstEventIdOn(state.selDate);
+
+    renderSummary();
+    renderCalendar();
+    renderDay();
+    bindControls();
+    renderTable();
+    renderProv();
+
+    $("#loading").hidden = true;
+    $("#root").hidden = false;
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

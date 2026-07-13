@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-13T13:44:59.695726+00:00",
+  "timezone": "Europe/Berlin",
+  "parameters": {
+    "model": { "name": "PANNs Cnn14_DecisionLevelMax", "version": "audioset", "device": "cpu" },
+    "normalization": { "enabled": true, "target_peak": 0.9, "max_gain": 20.0, "noise_floor": 0.005 },
+    "detection": { "threshold": 0.15, "min_event_seconds": 0.15, "merge_gap_seconds": 0.4, "dog_classes": ["Dog","Bark","Bow-wow","Yip","Howl","Growling","Whimper (dog)"] },
+    "audio": { "sample_rate": 32000, "window_seconds": 60 },
+    "intensity": { "metric": "rms", "scope": "per_file" },
+    "snippets": { "normalized": true, "target_lufs": -16.0 }
+  },
+  "recording_count": 2,
+  "event_count": 5,
+  "recordings": [
+    { "original_filename": "ZOOM0007.MP3", "sha256": "a1b2c3d4e5f6aaaa", "start_utc": "2026-07-05T20:30:00+00:00", "start_local": "2026-07-05T22:30:00+02:00", "duration_sec": 3600.0, "timestamp_source": "sdcard_ctime", "processed_at": null, "model_name": null, "model_version": null, "parameters": null },
+    { "original_filename": "ZOOM0008.MP3", "sha256": "b7c8d9e0f1a2bbbb", "start_utc": "2026-07-05T23:00:00+00:00", "start_local": "2026-07-06T01:00:00+02:00", "duration_sec": 3600.0, "timestamp_source": "sdcard_ctime", "processed_at": null, "model_name": null, "model_version": null, "parameters": null }
+  ],
+  "coverage": [
+    { "start": "2026-07-05T20:30:00+00:00", "end": "2026-07-05T21:30:00+00:00", "duration_sec": 3600.0 },
+    { "start": "2026-07-05T23:00:00+00:00", "end": "2026-07-06T00:00:00+00:00", "duration_sec": 3600.0 }
+  ],
+  "gaps": [
+    { "start": "2026-07-05T21:30:00+00:00", "end": "2026-07-05T23:00:00+00:00", "duration_sec": 5400.0 }
+  ],
+  "daily_summary": [
+    { "date": "2026-07-05", "count": 3, "total_bark_seconds": 2.9, "night_count": 3 },
+    { "date": "2026-07-06", "count": 2, "total_bark_seconds": 2.6, "night_count": 2 }
+  ],
+  "events": [
+    { "id": 1, "recording": "ZOOM0007.MP3", "abs_start_utc": "2026-07-05T20:32:00.500000+00:00", "abs_start_local": "2026-07-05T22:32:00.500000+02:00", "abs_end_utc": "2026-07-05T20:32:01.300000+00:00", "duration_sec": 0.8, "peak_conf": 0.92, "mean_conf": 0.71, "class": "Bark", "night": true, "intensity_relative": 1.0, "intensity_dbfs": -4.3, "snippet_url": "snippets/a1b2c3d4e5f6/050726_223200_000120500_-4dBFS.mp3" },
+    { "id": 2, "recording": "ZOOM0007.MP3", "abs_start_utc": "2026-07-05T20:32:01.400000+00:00", "abs_start_local": "2026-07-05T22:32:01.400000+02:00", "abs_end_utc": "2026-07-05T20:32:01.900000+00:00", "duration_sec": 0.5, "peak_conf": 0.88, "mean_conf": 0.64, "class": "Bark", "night": true, "intensity_relative": 0.9016, "intensity_dbfs": -5.2, "snippet_url": "snippets/a1b2c3d4e5f6/050726_223201_000121400_-5dBFS.mp3" },
+    { "id": 3, "recording": "ZOOM0007.MP3", "abs_start_utc": "2026-07-05T20:45:40+00:00", "abs_start_local": "2026-07-05T22:45:40+02:00", "abs_end_utc": "2026-07-05T20:45:41.600000+00:00", "duration_sec": 1.6, "peak_conf": 0.79, "mean_conf": 0.6, "class": "Howl", "night": true, "intensity_relative": 0.3279, "intensity_dbfs": -14.0, "snippet_url": "snippets/a1b2c3d4e5f6/050726_224540_000940000_-14dBFS.mp3" },
+    { "id": 4, "recording": "ZOOM0008.MP3", "abs_start_utc": "2026-07-05T23:05:05.200000+00:00", "abs_start_local": "2026-07-06T01:05:05.200000+02:00", "abs_end_utc": "2026-07-05T23:05:05.600000+00:00", "duration_sec": 0.4, "peak_conf": 0.71, "mean_conf": 0.55, "class": "Yip", "night": true, "intensity_relative": 0.1446, "intensity_dbfs": -18.4, "snippet_url": "snippets/b7c8d9e0f1a2/060726_010505_000305200_-18dBFS.mp3" },
+    { "id": 5, "recording": "ZOOM0008.MP3", "abs_start_utc": "2026-07-05T23:30:10.900000+00:00", "abs_start_local": "2026-07-06T01:30:10.900000+02:00", "abs_end_utc": "2026-07-05T23:30:13.100000+00:00", "duration_sec": 2.2, "peak_conf": 0.95, "mean_conf": 0.8, "class": "Bark", "night": true, "intensity_relative": 1.0, "intensity_dbfs": -1.6, "snippet_url": "snippets/b7c8d9e0f1a2/060726_013010_001810900_-2dBFS.mp3" }
+  ]
+}
