@@ -23,6 +23,7 @@ with each result, and the whole pipeline is reproducible and idempotent.
 - [Labeling (the local label server)](#labeling-the-local-label-server)
 - [Publishing and hosting](#publishing-and-hosting)
 - [Output and data contract](#output-and-data-contract)
+- [Database](#database)
 - [Configuration reference](#configuration-reference)
 - [Scientific background and references](#scientific-background-and-references)
 - [Testing](#testing)
@@ -417,6 +418,100 @@ The full `results.json` contract (schema v2) is documented in
 [`docs/sample_results.json`](docs/sample_results.json) and the `labels.json`
 format. The frontend design brief (prompt for claude.ai, incl. training mode) is
 [`docs/design-brief.md`](docs/design-brief.md).
+
+---
+
+## Database
+
+`barks.db` (SQLite) is the source of truth. `results.json` is a derived,
+per-run snapshot; the database is what accumulates and what the label server
+writes to live. Four tables:
+
+```mermaid
+erDiagram
+    recordings   ||--o{ bark_events : "has (recording_id)"
+    bark_events  ||..o| event_labels : "joined by event_key"
+
+    recordings {
+        int  id PK
+        text sha256 UK "file identity (integrity)"
+        text original_filename
+        text archived_path
+        real duration_sec
+        text start_utc
+        text start_local
+        text timezone
+        text timestamp_source
+        text mtime_utc "clock-drift cross-check"
+        text processed_at "NULL until analyzed"
+        text model_name
+        text parameters_json "provenance snapshot"
+    }
+    bark_events {
+        int  id PK
+        int  recording_id FK
+        text event_key "STABLE id: sha12_offsetms"
+        real offset_start_sec
+        real abs_start_utc
+        real duration_sec
+        real peak_conf
+        real intensity_raw "raw loudness (0..1)"
+        text top_class
+        text embedding "JSON vector (identification)"
+        text dog_label "primary resolved dog"
+        text dog_labels "JSON array (multi-dog human)"
+        real dog_confidence
+        text dog_label_source "human | predicted"
+        text snippet_path
+    }
+    event_labels {
+        text event_key PK "matches bark_events.event_key"
+        text label "dog name | JSON list | unsure/multiple/not_a_dog"
+        text source "human"
+        text labeled_at
+    }
+    meta {
+        text key PK "e.g. segmentation_fingerprint, identification_metrics"
+        text value "string / JSON"
+    }
+```
+
+Key points:
+- **`bark_events.recording_id` → `recordings.id`** is a real foreign key
+  (`ON DELETE CASCADE`). Re-analyzing a recording clears and rebuilds *its*
+  `bark_events`, so DB `id`s are not stable.
+- **`event_labels` is joined by the stable `event_key`** (`<sha12>_<offset_ms>`),
+  *not* by `id` — so human labels survive DB rebuilds and re-runs as long as
+  segmentation is unchanged (see the [segmentation guard](#the-segmentation-guard)).
+- **`meta`** is a small key/value store: the segmentation fingerprint (guard) and
+  the identification metrics live here.
+- **Schema auto-migrates** on open — new columns are added to an existing DB via
+  `ALTER TABLE`, so upgrading never requires deleting the database (which would
+  also delete your labels).
+
+### Concurrency — one writer at a time
+
+SQLite allows a **single writer**. A long `analyze`/`identify` run holds a write
+lock on `barks.db` for its whole duration, and opening the DB elsewhere (even
+`serve`, which runs schema setup on open) will fail with **`database is locked`**.
+
+- **Don't `serve` and `analyze` the *same* dataset at once** — wait for the run
+  to finish, then serve. (Serving mid-run shows nothing new anyway: the frontend
+  reads `results.json`, which is only written at the `export` step.)
+- To view/label during a long run, `serve` a **different** dataset (e.g. the main
+  one on :8000 while the fine one builds on its own DB).
+
+### Inspecting the DB
+
+It's plain SQLite — open `barks.db` with any tool (DB Browser for SQLite, the
+`sqlite3` CLI, a JetBrains data source). Quick counts:
+
+```sql
+SELECT COUNT(*) FROM bark_events;                         -- total detections
+SELECT dog_label, COUNT(*) FROM bark_events GROUP BY dog_label ORDER BY 2 DESC;
+SELECT label, COUNT(*) FROM event_labels GROUP BY label;  -- your labels so far
+SELECT value FROM meta WHERE key = 'identification_metrics';
+```
 
 ---
 
