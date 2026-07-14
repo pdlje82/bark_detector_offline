@@ -357,7 +357,7 @@
               <select id="f-cls"><option value="all">All</option></select>
             </label>
             <label>Status <select id="f-status"><option value="all">All</option><option value="labeled">Labeled</option><option value="unlabeled">Unlabeled</option><option value="confirmed">Confirmed</option><option value="relabeled">Relabeled</option></select></label>
-            <label>Dog <select id="f-dog"><option value="all">All labels</option></select></label>
+            <label>Dog <select id="f-dog"><option value="all">All dogs</option></select></label>
             <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
             <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
           </div>
@@ -569,6 +569,7 @@
   function labelToArray(v) { if (v == null || v === "") return []; return Array.isArray(v) ? v.slice() : [v]; }
   function labelDisplay(arr) { return arr.map(function (id) { return labelName(id); }).join(", "); }
   function eventDogs(e) { if (Array.isArray(e.dog_labels) && e.dog_labels.length) return e.dog_labels.slice(); if (e.dog_label != null && e.dog_label !== "") return [e.dog_label]; return []; }
+  function effectiveDogs(e) { var human = labelToArray(state.labels[evKey(e)]); return human.length ? human : eventDogs(e); }
   function sameSet(a, b) { if (a.length !== b.length) return false; var sa = a.slice().sort(), sb = b.slice().sort(); for (var i = 0; i < sa.length; i++) if (String(sa[i]) !== String(sb[i])) return false; return true; }
   function evStatus(e) {
     var cur = labelToArray(state.labels[evKey(e)]);
@@ -1111,7 +1112,7 @@
     if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
     if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
     if (f.status !== "all") { var st = evStatus(e); if (f.status === "labeled" ? st === "unlabeled" : st !== f.status) return false; }
-    if (f.dog !== "all" && labelToArray(state.labels[evKey(e)]).indexOf(f.dog) < 0) return false;
+    if (f.dog !== "all" && effectiveDogs(e).indexOf(f.dog) < 0) return false;
     return true;
   }
   function sortRows(rows) {
