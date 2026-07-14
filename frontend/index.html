@@ -154,6 +154,7 @@
   .tick { position: absolute; }
   .ov .tick { top: 6px; bottom: 6px; width: 2px; margin-left: -1px; }
   .roi .tick { top: 7px; bottom: 7px; width: 4px; margin-left: -2px; border-radius: 2px; }
+  .roi .tick.bar { margin-left: 0; min-width: 2px; opacity: 0.9; }
   .roi-box { position: absolute; top: -1px; bottom: -1px; border: 2px solid var(--roi-border); background: var(--roi-fill); border-radius: 3px; pointer-events: none; }
   .axis { position: relative; height: 14px; margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--faint); }
   .axis span { position: absolute; }
@@ -201,6 +202,13 @@
   .controls .rng { display: flex; align-items: center; gap: 8px; color: var(--muted); }
   .controls .rng .rv { font-family: var(--mono); color: var(--ink); min-width: 34px; }
   .controls .shown { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: auto; }
+  /* Global filter bar — sticky control strip that scopes every view below it. */
+  .filterbar { position: sticky; top: 0; z-index: 30; margin-top: 18px; padding: 12px 24px;
+    background: var(--panel2); border: 1px solid var(--line2); border-left: 3px solid var(--night);
+    border-radius: 14px; display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; }
+  .filterbar .fbar-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+  .filterbar .controls { margin-bottom: 0; flex: 1 1 auto; }
 
   table.log { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.log th { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 0 10px 8px 0; border-bottom: 1.5px solid var(--ink); cursor: pointer; white-space: nowrap; }
@@ -337,6 +345,23 @@
     <header class="band" id="summary"></header>
     <div id="warnSlot"></div>
 
+    <section class="filterbar" id="filterbar" aria-label="Filters (apply to the whole report)">
+      <span class="fbar-label">Filters</span>
+      <div class="controls">
+        <div class="crow">
+          <label><input type="checkbox" id="f-night"> Night only</label>
+          <label><input type="checkbox" id="f-day"> Selected day only</label>
+          <label>Class
+            <select id="f-cls"><option value="all">All</option></select>
+          </label>
+          <label>Status <select id="f-status"><option value="all">All</option><option value="labeled">Labeled</option><option value="unlabeled">Unlabeled</option><option value="confirmed">Confirmed</option><option value="relabeled">Relabeled</option></select></label>
+          <label>Dog <select id="f-dog"><option value="all">All dogs</option></select></label>
+          <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
+          <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
+        </div>
+      </div>
+    </section>
+
     <section class="panel flush">
       <div class="cols">
         <div class="cal pad" id="calWrap"></div>
@@ -351,19 +376,8 @@
         </div>
         <div class="controls" id="controls">
           <div class="crow">
-            <label><input type="checkbox" id="f-night"> Night only</label>
-            <label><input type="checkbox" id="f-day"> Selected day only</label>
-            <label>Class
-              <select id="f-cls"><option value="all">All</option></select>
-            </label>
-            <label>Status <select id="f-status"><option value="all">All</option><option value="labeled">Labeled</option><option value="unlabeled">Unlabeled</option><option value="confirmed">Confirmed</option><option value="relabeled">Relabeled</option></select></label>
-            <label>Dog <select id="f-dog"><option value="all">All dogs</option></select></label>
             <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
             <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
-          </div>
-          <div class="crow">
-            <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
-            <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
             <span class="shown" id="labelstats"></span>
             <span class="shown" id="shown"></span>
           </div>
@@ -864,7 +878,7 @@
     var roiRaw = dayEvents.filter(function (o) { var r = o.w.t - mid; return r >= lo && r <= hi; });
     var phHtml = (state.playCursorMs != null && state.playCursorMs >= lo && state.playCursorMs <= hi)
       ? '<div class="playhead" id="roiPlayhead" style="left:' + rp(state.playCursorMs) + '%"></div>' : "";
-    var roiTicks = roiRaw.map(function (o) { var st = evStatus(o.e); var ring = st !== "unlabeled" ? ";box-shadow:0 0 0 1.5px " + statusMeta(st).c : ""; return '<div class="tick" data-id="' + o.e.id + '" style="left:' + rp(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + ring + '"></div>'; }).join("");
+    var roiTicks = roiRaw.map(function (o) { var st = evStatus(o.e); var ring = st !== "unlabeled" ? ";box-shadow:0 0 0 1.5px " + statusMeta(st).c : ""; var wPct = ((o.e.duration_sec || 0) * 1000) / (hi - lo) * 100; return '<div class="tick bar" data-id="' + o.e.id + '" title="' + esc(o.e.class + " \u00b7 " + fmtDur(o.e.duration_sec)) + '" style="left:' + rp(o.w.t - mid) + '%;width:' + wPct + '%;background:' + intensityColor(o.e.intensity_relative) + ring + '"></div>'; }).join("");
 
     var summary = sum ? (sum.count + " detection" + (sum.count === 1 ? "" : "s") + " \u00b7 " + sum.night_count + " at night") : "No recording this day";
 
@@ -886,15 +900,15 @@
             kv("Loudness", fmtDbfs(selEv.intensity_dbfs)) +
             kv("Rel. intensity", fmtRel(selEv.intensity_relative)) +
           '</div>' +
+          '<div class="caps" style="margin-top:14px">Selected clip</div>' +
+          audioHtml(selEv) +
           (state.mode === "label" ? labelBlock(selEv) : "") +
         '</div>';
     }
-    var playerHtml = (selEv && wall(selEv.abs_start_local).date === dateStr) ? ('<div class="caps">Selected clip</div>' + audioHtml(selEv)) : "";
 
     wrap.innerHTML =
       '<div class="daytitle">' + esc(dayLabel(dateStr)) + '</div>' +
       '<div class="daysub">' + esc(summary) + '</div>' +
-      selHtml +
       '<div class="caps">Full day \u2014 tap to move window</div>' +
       '<div class="strip ov" data-action="moveRoi">' + ovSegs + ovTicks +
         '<div class="roi-box" style="left:' + (lo / DAY * 100) + '%;width:' + ((hi - lo) / DAY * 100) + '%"></div>' +
@@ -911,7 +925,7 @@
       '<div class="caps">Events in window</div>' +
       (roiRaw.length ? '<div class="evlist">' + sortRows(roiRaw.slice()).map(function (o) { return evCard(o.e, o.w); }).join("") + '</div>'
                      : '<div class="empty">No events match here \u2014 adjust filters, zoom out, or move the window.</div>') +
-      playerHtml;
+      selHtml;
 
     // wire audio for the selected event
     var _nl = wrap.querySelector(".evlist"); if (_nl) _nl.scrollTop = prevScroll;
