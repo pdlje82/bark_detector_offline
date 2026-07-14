@@ -171,6 +171,89 @@ def test_export_includes_identity(tmp_path):
     assert by_dog.get("rex", 0) >= 1 and by_dog.get("bella", 0) >= 1   # both credited
 
 
+def test_label_api_roundtrip(tmp_path):
+    """The Flask label API writes/reads/deletes labels directly in the DB."""
+    from barkdetect.serve import _build_app
+    from barkdetect.store import Store
+    db = tmp_path / "barks.db"
+    Store(str(db)).close()                                    # create the DB/schema
+    (tmp_path / "frontend").mkdir()
+    (tmp_path / "export").mkdir()
+    cfg = SimpleNamespace(
+        project_root=tmp_path,
+        export=SimpleNamespace(filename="results.json"),
+        path=lambda k: {"export_dir": tmp_path / "export",
+                        "snippets_dir": tmp_path / "snippets",
+                        "db_path": db}[k])
+    client = _build_app(cfg).test_client()
+
+    assert client.get("/api/labels").get_json() == {}
+    assert client.put("/api/labels/k1", json={"label": "Podenco"}).status_code == 200
+    client.put("/api/labels/k2", json={"label": ["Podenco", "Clooney"]})     # multi-dog
+    labels = client.get("/api/labels").get_json()
+    assert labels["k1"] == "Podenco"
+    assert labels["k2"] == ["Podenco", "Clooney"]              # array round-trips
+    assert client.put("/api/labels/k3", json={}).status_code == 400   # missing label
+    client.delete("/api/labels/k1")
+    assert "k1" not in client.get("/api/labels").get_json()
+    # written straight to the DB
+    assert Store(str(db)).all_labels() == {"k2": '["Podenco", "Clooney"]'}
+
+
+def test_delete_and_count_labels(tmp_path):
+    from barkdetect.store import Store
+    store = Store(tmp_path / "t.db")
+    store.upsert_label("k1", "rex", "human", "t")
+    store.upsert_label("k2", "bella", "human", "t")
+    store.commit()
+    assert store.count_labels() == 2
+    assert store.delete_label("k1") == 1
+    assert store.delete_label("k1") == 0          # already gone
+    assert store.count_labels() == 1
+    assert store.all_labels() == {"k2": "bella"}
+    assert store.clear_labels() == 1
+    assert store.count_labels() == 0
+
+
+def test_segmentation_fingerprint_sensitivity():
+    from barkdetect.guard import segmentation_fingerprint as fp
+
+    def mk(threshold=0.15, merge=0.4, padding=2.0):
+        return SimpleNamespace(
+            detection=SimpleNamespace(threshold=threshold, min_event_seconds=0.15,
+                                      merge_gap_seconds=merge, dog_classes=["Dog", "Bark"]),
+            normalization=SimpleNamespace(enabled=True, target_peak=0.9, max_gain=20.0, noise_floor=0.005),
+            audio=SimpleNamespace(sample_rate=32000, window_seconds=60, min_window_seconds=1.0),
+            snippets=SimpleNamespace(padding_seconds=padding))
+
+    base = fp(mk())
+    assert fp(mk()) == base                                  # stable for equal config
+    assert fp(mk(merge=0.2)) != base                          # segmentation change → differs
+    assert fp(mk(threshold=0.2)) != base
+    assert fp(mk(padding=1.0)) == base                        # snippet change → unaffected
+
+
+def test_segmentation_guard(tmp_path, monkeypatch):
+    """Guard clears labels only when segmentation changed, labels exist, and confirmed."""
+    from barkdetect.store import Store
+    from barkdetect.guard import enforce_guard
+    store = Store(tmp_path / "t.db")
+    store.upsert_label("k1", "rex", "human", "t"); store.commit()
+
+    # matching fingerprint -> no-op, labels kept
+    store.set_meta("segmentation_fingerprint", "FP_A"); store.commit()
+    enforce_guard(SimpleNamespace(), store, "FP_A")
+    assert store.count_labels() == 1
+
+    # changed fingerprint, non-interactive with ASSUME_YES -> clears
+    monkeypatch.setenv("BARKDETECT_ASSUME_YES", "1")
+    enforce_guard(SimpleNamespace(), store, "FP_B")
+    assert store.count_labels() == 0
+
+    # changed fingerprint but no labels -> no error
+    enforce_guard(SimpleNamespace(), store, "FP_C")
+
+
 def test_publish_bundle(tmp_path):
     """publish assembles index.html + real results.json + snippets, excludes the rest."""
     from barkdetect.publish import publish

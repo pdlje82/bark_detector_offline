@@ -206,6 +206,22 @@ class Store:
         cur = self.conn.execute("SELECT event_key, label FROM event_labels")
         return {r["event_key"]: r["label"] for r in cur.fetchall()}
 
+    def delete_label(self, event_key: str) -> int:
+        """Remove a human label. Returns rows deleted (0 or 1)."""
+        cur = self.conn.execute("DELETE FROM event_labels WHERE event_key=?", (event_key,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def clear_labels(self) -> int:
+        """Delete ALL human labels (used by the segmentation guard). Returns count."""
+        cur = self.conn.execute("DELETE FROM event_labels")
+        self.conn.commit()
+        return cur.rowcount
+
+    def count_labels(self) -> int:
+        """Number of stored human labels."""
+        return self.conn.execute("SELECT COUNT(*) FROM event_labels").fetchone()[0]
+
     def events_with_embeddings(self) -> list[sqlite3.Row]:
         """Return events that have an embedding, with their key and embedding."""
         cur = self.conn.execute(

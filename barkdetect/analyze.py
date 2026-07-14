@@ -17,6 +17,7 @@ from time import perf_counter
 from . import detect
 from .detect import _fmt_hms
 from .embeddings import embed_segment
+from .guard import enforce_guard, segmentation_fingerprint
 from .snippets import extract_snippet, snippet_relpath
 from .store import Store
 
@@ -34,10 +35,17 @@ def analyze(cfg, store: Store) -> dict:
 
     Returns a summary dict with the number of recordings and events processed.
     """
-    recs = store.unprocessed_recordings()
+    reprocess = getattr(cfg.run, "reprocess", False)
+    recs = store.all_recordings() if reprocess else store.unprocessed_recordings()
     if not recs:
-        log.info("  no unprocessed recordings")
+        log.info("  no recordings to %s", "reprocess" if reprocess else "process")
         return {"recordings": 0, "events": 0}
+    if reprocess:
+        log.info("  reprocess mode: re-analyzing all %d recordings", len(recs))
+
+    # Guard human labels against a segmentation change before touching events.
+    fingerprint = segmentation_fingerprint(cfg)
+    enforce_guard(cfg, store, fingerprint)
 
     t_load = perf_counter()
     log.info("  loading model (%s) on %s ...", cfg.model.name, cfg.model.device)
@@ -130,4 +138,7 @@ def analyze(cfg, store: Store) -> dict:
              _fmt_hms(run_elapsed),
              total_audio / run_elapsed if run_elapsed > 0 else float("nan"),
              total_events)
+    # Record the segmentation that produced these events (for the guard).
+    store.set_meta("segmentation_fingerprint", fingerprint)
+    store.commit()
     return {"recordings": len(recs), "events": total_events}

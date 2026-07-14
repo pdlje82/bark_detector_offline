@@ -46,12 +46,24 @@ Then open `http://localhost:8000/`.
 A copy of the sample results ships here as `results.json` for local testing;
 in production it is replaced by the real export.
 
-## Training mode (labeling)
+## Labeling mode & the label API
 
-A **Training mode** toggle in the header (off by default) turns on a human
-labeling workflow for building/reviewing a dataset. All other views are
-unchanged when it's off, and the page stays fully static — no network calls
-beyond the existing `fetch('./results.json')`.
+The page detects its mode at load by probing the label API with `GET api/labels`
+(relative to the page, same origin as the static assets and `results.json`):
+
+- **API reachable → Labeling mode.** Labels are read from the API on load and the
+  API is the source of truth (a small in-memory cache is kept only for
+  responsiveness). Every event gets a multi-select chip control; setting or
+  changing a label immediately `PUT api/labels/<event.key>` with
+  `{ "label": <string|array> }`, and clearing it sends `DELETE
+  api/labels/<event.key>`. Writes are optimistic — the change shows at once; if
+  the request fails a brief "couldn't save — retry" note appears while the
+  pending change stays visible, and Retry re-sends it. A header indicator reads
+  **"Labeling — saved to database."**
+- **API not reachable → Read-only presentation mode.** No labeling controls; the
+  page shows the labels/predictions already in `results.json`
+  (`dog_labels` / `dog_label` / `dog_label_source`) only. The indicator reads
+  **"Read-only."**
 
 - **Roster** — label options come from `RESULTS.dogs`, plus three fixed extras:
   *Unsure*, *Multiple dogs*, and *Not a dog (false positive)*.
@@ -59,10 +71,9 @@ beyond the existing `fetch('./results.json')`.
   control (chips) next to its play button. Dog names (from `RESULTS.dogs`) are
   multi-toggle — tag two dogs when two are barking — while the three specials
   (Unsure / Multiple dogs / Not a dog) are mutually exclusive and clear any dog
-  selection (and vice-versa). Selections are stored in `localStorage` keyed by
-  the event's `key`; the value is a **string** for a single dog/option or an
-  **array** of names for several dogs. They survive reloads.
-- **Status at a glance** — every event shows a status dot in **both** modes (in the
+  selection (and vice-versa). The value sent to the API is a **string** for a
+  single dog/option or an **array** of names for several dogs.
+- **Status at a glance** — every event shows a status dot in both modes (in the
   table, the detail card, the 24h timeline ticks, and the calendar): *unlabeled*
   (hollow), *confirmed* = the human label matches the model suggestion (green),
   or *relabeled* = the human label differs from the suggestion (amber). The
@@ -73,20 +84,13 @@ beyond the existing `fetch('./results.json')`.
   status), and a Sort control (Time / Confidence / Intensity / Duration / Class,
   with a direction toggle). All event filters and the sort apply to **both** the
   event log and the day-detail timeline + "events in window" list.
-- **Speed** — keyboard shortcuts: `1`–`9`
-  assign a roster option, `0` clears, `Space` plays/pauses the current clip,
-  `J`/`K` (or `↓`/`↑`) step through events, and `N` jumps to the next unlabeled.
-- **Export** — the "Export labels" button downloads a `labels.json`:
+- **Speed** — keyboard shortcuts (labeling mode): `1`–`9` toggle a roster
+  option, `0` clears, `Space` plays/pauses the current clip, `J`/`K` (or
+  `↓`/`↑`) step through events, and `N` jumps to the next unlabeled.
 
-  ```json
-  { "schema": 1, "exported_at": "<ISO>",
-    "labels": { "<event.key.a>": "Rex", "<event.key.b>": ["Rex", "Bella"] } }
-  ```
-
-  Values are a string (one dog/option) or an array of names (several dogs).
-
-Labels live only in the browser (localStorage) and in the exported file; the
-page never writes back to `results.json` or the backend.
+The `event.key` is the stable identifier used both as the API path segment and
+the map key. All API paths are relative, so the same file works wherever the
+backend serves it.
 
 ## Dog identification reliability
 

@@ -19,6 +19,7 @@ with each result, and the whole pipeline is reproducible and idempotent.
 - [Running the pipeline](#running-the-pipeline)
 - [How detection works (inference)](#how-detection-works-inference)
 - [Training: telling the dogs apart](#training-telling-the-dogs-apart)
+- [Labeling (the local label server)](#labeling-the-local-label-server)
 - [Publishing and hosting](#publishing-and-hosting)
 - [Output and data contract](#output-and-data-contract)
 - [Configuration reference](#configuration-reference)
@@ -231,17 +232,16 @@ identification by voice** — a hard, inherently imperfect problem (see the
 1. **Embeddings** — `analyze` computes a per-event embedding (config
    `identification.embedding`, default `librosa`: MFCC + spectral + ZCR features).
    Stored per event; no extra model download.
-2. **Label in the website** — turn on *training mode*, play a clip, pick the dog
-   from a dropdown (roster from `identification.dogs`) or `Unsure` / `Multiple` /
-   `Not a dog`. Labels persist in the browser.
-3. **Export `labels.json`** — one click downloads
-   `{ "labels": { "<event.key>": "Socke", ... } }`. Drop it at
-   `identification.labels_path` (default `data/labels.json`).
-4. **`identify` step** — ingests the labels, trains the classifier once there are
-   ≥ `min_labels_per_dog` labels for ≥ 2 dogs, saves the model, and predicts a dog
-   for **every** event. Human labels always win; the rest get a *predicted* dog +
-   confidence.
-5. **Re-export / publish** — `dog_label`, `dog_confidence`, and `dog_label_source`
+2. **Label in the website** — run `python -m barkdetect serve`, turn on *training
+   mode*, play a clip, and pick the dog(s) from the roster (`identification.dogs`)
+   or `Unsure` / `Multiple` / `Not a dog`. Labels are saved **directly to
+   `barks.db`** (see [Labeling](#labeling-the-local-label-server)) — no export
+   step.
+3. **`identify` step** — reads the labels from the DB, trains the classifier once
+   there are ≥ `min_labels_per_dog` labels for ≥ 2 dogs, saves the model, and
+   predicts a dog for **every** event. Human labels always win; the rest get a
+   *predicted* dog + confidence.
+4. **Export / publish** — `dog_label`, `dog_confidence`, and `dog_label_source`
    land in `results.json`; the frontend shows *confirmed* vs *suggested* distinctly.
 
 Labels are keyed by a **stable `event_key`** (`<sha12>_<offsetms>`), so they
@@ -265,6 +265,46 @@ review*. Never assert an unqualified per-dog count. The core evidence
 attribution is a reviewed layer on top.
 
 ---
+
+## Labeling (the local label server)
+
+Labeling runs **locally** on the PC that holds `barks.db`, via a small server:
+
+```bash
+python -m barkdetect serve   # http://127.0.0.1:8000 by default (config `serve.*`)
+```
+
+Open the URL, turn on training mode, and label. Labels are written **directly to
+`barks.db`** — there is no export/import step, and edits/deletes take effect
+immediately. The database is the single source of truth; clearing the browser
+loses nothing. The hosted, read-only evidence view (the `publish` bundle) has no
+API and simply shows the labels baked into `results.json`.
+
+### Re-cutting snippets without losing labels
+
+Snippet settings (padding, length, naming, loudness) are **cosmetic** — they
+don't change event identity, so changing them keeps your labels. To apply new
+snippet settings to already-processed recordings, set `run.reprocess: true` and
+run `[analyze, export, publish]`. This re-detects and re-cuts every recording
+while preserving `event_labels`. **Never delete `barks.db` to reprocess** — it
+also holds your labels.
+
+### The segmentation guard
+
+Labels are keyed by `event_key = <sha12>_<offset_ms>`. Changing *segmentation*
+(`detection.threshold`, `merge_gap_seconds`, `min_event_seconds`, normalization,
+audio windowing, `dog_classes`) shifts offsets and **orphans labels**. When such a
+change is detected and labels exist, `analyze` **stops and asks** you to type
+`yes` before clearing them:
+
+```
+⚠ segmentation parameters changed since 37 label(s) were created.
+  Type 'yes' to CLEAR 37 label(s) and continue:
+```
+
+Anything but `yes` aborts with nothing changed. `BARKDETECT_ASSUME_YES=1`
+auto-confirms (for automation); no terminal → abort. **Lock segmentation before
+mass labeling**; afterwards only snippet tweaks (free) and the guard protects you.
 
 ## Publishing and hosting
 
@@ -320,7 +360,8 @@ it does. Paths resolve against `paths.root` unless absolute. 🔧 = likely to tu
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `source` 🔧 | `E:/DCIM` | Folder/SD-card path to ingest from. Keep it to recordings only. |
-| `steps` 🔧 | `[ingest, analyze, identify, export, publish]` | Which stages run, in order. |
+| `steps` 🔧 | `[ingest, analyze, identify, export, publish]` | Which stages run, in order. A positional arg overrides, e.g. `python -m barkdetect serve`. |
+| `reprocess` 🔧 | `false` | `true` = re-analyze **all** recordings (re-cut snippets/embeddings), preserving labels. Use after changing snippet settings. |
 
 ### `paths` — where data lives
 
@@ -400,7 +441,7 @@ absolute and comparable across files.
 | `enabled` 🔧 | `true` | Compute embeddings and run the `identify` step. |
 | `embedding` 🔧 | `librosa` | Fingerprint backend: `librosa` (no download) \| `panns` \| `aves`. |
 | `classifier` 🔧 | `logreg` | `logreg` (logistic regression) or `knn`. |
-| `min_labels_per_dog` 🔧 | `8` | Need ≥ this many labels for ≥ 2 dogs before training. |
+| `min_labels_per_dog` 🔧 | `5` | Need ≥ this many labels for ≥ 2 dogs before training. |
 | `labels_path` | `data/labels.json` | Where the website's exported labels are read from. |
 | `model_path` | `data/models/dog_clf.joblib` | Where the trained classifier is saved. |
 | `dogs` 🔧 | — | Roster of real dog names — dropdown options and classifier classes. |
@@ -445,6 +486,8 @@ absolute and comparable across files.
 | `logging.level` 🔧 | `INFO` | `DEBUG` \| `INFO` \| `WARNING` (`DEBUG` adds per-window position). |
 | `logging.progress_bar` 🔧 | `true` | Live tqdm bar; `false` for headless/cron. |
 | `logging.log_file` | `data/processing.log` | Appended audit trail; `null` = console only. |
+| `serve.host` | `127.0.0.1` | Bind address for the label server. Localhost-only by default. |
+| `serve.port` | `8000` | Port for the label server. |
 
 ---
 

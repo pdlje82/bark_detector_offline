@@ -51,6 +51,7 @@ class Config:
         self.snippets = _to_ns(data["snippets"])
         self.coverage = _to_ns(data["coverage"])
         self.export = _to_ns(data["export"])
+        self.serve = _to_ns(data.get("serve", {"host": "127.0.0.1", "port": 8000}))
         self.logging = _to_ns(data["logging"])
         self._paths = data["paths"]
 

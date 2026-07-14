@@ -109,11 +109,28 @@ These are **honest held-out estimates**, not resubstitution. Present accuracy an
 the confusion matrix as the reliability of the *suggested* per-dog attribution;
 human-confirmed labels are unaffected by model quality.
 
-## `labels.json` (frontend → backend)
+## Label API (frontend ↔ backend, live)
 
-Produced by the website's training mode and dropped into the pipeline
-(`identification.labels_path`). The pipeline ingests it, trains the classifier,
-and predicts a dog for every event.
+The primary labeling path is a small local server (`python -m barkdetect serve`)
+that reads/writes human labels **directly in `barks.db`** — the single source of
+truth. The frontend uses it in *labeling mode*; a hosted static copy without the
+API is *read-only*.
+
+| Method / route | Body | Effect |
+|---|---|---|
+| `GET /api/labels` | — | Returns `{ event_key: label }`; a multi-dog label comes back as an array. |
+| `PUT /api/labels/<event_key>` | `{ "label": "Podenco" \| ["Podenco","Clooney"] }` | Create/update the label. |
+| `DELETE /api/labels/<event_key>` | — | Remove the label. |
+
+Label values are a dog name, a list of names, or one of `unsure`/`multiple`/
+`not_a_dog`. Because writes hit the DB immediately, there is no export/import step
+and deletions propagate.
+
+## `labels.json` (legacy, optional import)
+
+Still supported for a one-off bulk import if a file is present at
+`identification.labels_path`, but no longer the primary path (the API is). The
+pipeline merges it (additively), trains the classifier, and predicts per event.
 
 ```json
 {

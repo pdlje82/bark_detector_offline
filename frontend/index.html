@@ -219,13 +219,20 @@
   .foot { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: center; margin-top: 22px; }
 
   /* ---- training mode ---- */
-  #root:not(.training) .train-only { display: none !important; }
+  #root:not(.labeling) .train-only { display: none !important; }
   .switch { margin-top: 12px; align-self: flex-start; display: inline-flex; align-items: center; gap: 9px; background: transparent; border: 1px solid var(--band-line); color: var(--band-ink); padding: 6px 12px 6px 8px; border-radius: 999px; cursor: pointer; }
   .switch .knob { width: 34px; height: 18px; border-radius: 999px; background: #3a3934; position: relative; transition: background .15s; flex-shrink: 0; }
   .switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #cfccc4; transition: left .15s; }
   .switch[aria-pressed="true"] .knob { background: var(--night-lite); }
   .switch[aria-pressed="true"] .knob::after { left: 18px; background: #fff; }
   .switch .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .modeind { margin-top: 12px; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--band-line); color: var(--band-ink); }
+  .modeind .md { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .modeind.label .md { background: #4fae7d; }
+  .modeind.readonly .md { background: var(--band-faint); }
+  .savenote { margin-top: 10px; padding: 8px 12px; border: 1px solid #a83a29; background: rgba(168,58,41,0.12); border-radius: 8px; font-size: 12px; color: var(--ink); display: none; align-items: center; gap: 10px; }
+  .savenote.on { display: flex; }
+  .savenote button { padding: 4px 10px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 6px; cursor: pointer; font-size: 12px; }
   .btn { padding: 7px 12px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 7px; cursor: pointer; font-size: 13px; }
   .btn:hover { border-color: var(--faint); }
   .pred { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
@@ -344,7 +351,6 @@
           <label>Dog <select id="f-dog"><option value="all">All labels</option></select></label>
           <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
           <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
-          <button class="btn train-only" id="exportLabels" data-action="exportLabels">Export labels</button>
           <span class="shown" id="labelstats"></span>
           <span class="shown" id="shown"></span>
         </div>
@@ -390,8 +396,9 @@
     selId: null,
     sortKey: "time",
     sortDir: 1,
-    training: false,
+    mode: "readonly",
     labels: {},
+    pending: {},
     filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all" }
   };
 
@@ -415,7 +422,17 @@
         if (!data || !Array.isArray(data.events) || !Array.isArray(data.recordings)) {
           throw new Error("results.json is missing required fields (events / recordings).");
         }
-        boot(data);
+        // Probe the label API. Reachable -> labeling mode (API is authoritative);
+        // unreachable (hosted static copy) -> read-only presentation mode.
+        return apiProbe().then(function (labels) {
+          state.mode = "label";
+          state.apiLabels = (labels && typeof labels === "object") ? labels : {};
+          boot(data);
+        }, function () {
+          state.mode = "readonly";
+          state.apiLabels = null;
+          boot(data);
+        });
       })
       .catch(function (err) { fail(String(err && err.message || err)); });
   }
@@ -499,10 +516,38 @@
     return months;
   }
 
-  /* ---------- training / labeling ---------- */
-  var LABELS_KEY = "barkdetect.labels.v1";
-  function loadLabels() { try { return JSON.parse(localStorage.getItem(LABELS_KEY) || "{}") || {}; } catch (e) { return {}; } }
-  function saveLabels(m) { try { localStorage.setItem(LABELS_KEY, JSON.stringify(m)); } catch (e) {} }
+  /* ---------- labels: label API (authoritative), in-memory cache ---------- */
+  var API = "api/labels"; // relative to this page's directory; same origin as static assets
+  function apiProbe() {
+    return fetch(API, { method: "GET", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+  function apiPut(key, label) {
+    return fetch(API + "/" + encodeURIComponent(key), {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: label })
+    }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r; });
+  }
+  function apiDelete(key) {
+    return fetch(API + "/" + encodeURIComponent(key), { method: "DELETE" })
+      .then(function (r) { if (!r.ok && r.status !== 404) throw new Error("HTTP " + r.status); return r; });
+  }
+  function showSaveError(retryFn) {
+    var el = $("#savenote"); if (!el) return;
+    el.innerHTML = "Couldn\u2019t save to the database. Your change is still shown here. <button type=\"button\" id=\"saveRetry\">Retry</button>";
+    el.classList.add("on");
+    var b = $("#saveRetry"); if (b) b.onclick = function () { clearSaveError(); if (retryFn) retryFn(); };
+  }
+  function clearSaveError() { var el = $("#savenote"); if (el) { el.classList.remove("on"); el.innerHTML = ""; } }
+  // optimistic write: state already updated; sync value to the API, surface errors
+  function persist(key) {
+    if (state.mode !== "label") return;
+    clearSaveError();
+    var val = state.labels[key];
+    var op = (val == null) ? function () { return apiDelete(key); } : function () { return apiPut(key, val); };
+    op().catch(function () { showSaveError(function () { persist(key); }); });
+  }
   function evKey(e) { return e.key != null ? String(e.key) : ("id:" + e.id); }
   function eventByKey(key) { for (var i = 0; i < R.events.length; i++) if (evKey(R.events[i]) === key) return R.events[i]; return null; }
   function isSpecial(id) { return id === "unsure" || id === "multiple" || id === "not_a_dog"; }
@@ -605,17 +650,17 @@
       if (dogs.length === 0) delete state.labels[key];
       else state.labels[key] = dogs.length === 1 ? dogs[0] : dogs;
     }
-    saveLabels(state.labels);
+    persist(key);
     applyLabelDom(key);
   }
   function clearCurrent() {
     if (state.selId == null) return;
     var e = null; for (var i = 0; i < R.events.length; i++) if (R.events[i].id === state.selId) { e = R.events[i]; break; }
-    if (!e) return; var key = evKey(e); delete state.labels[key]; saveLabels(state.labels); applyLabelDom(key);
+    if (!e) return; var key = evKey(e); delete state.labels[key]; persist(key); applyLabelDom(key);
   }
   function setLabel(key, val, inPlace) {
     if (val === "" || val == null) delete state.labels[key]; else state.labels[key] = val;
-    saveLabels(state.labels);
+    persist(key);
     if (inPlace) applyLabelDom(key); else { renderTable(); renderDay(); updateLabelStats(); }
   }
   function applyLabelDom(key) {
@@ -643,20 +688,8 @@
     R.events.forEach(function (e) { var s = evStatus(e); if (s === "confirmed") c++; else if (s === "relabeled") r++; else u++; });
     el.textContent = c + " confirmed \u00b7 " + r + " relabeled \u00b7 " + u + " unlabeled";
   }
-  function toggleTraining() {
-    state.training = !state.training;
-    var root = $("#root"); if (root) root.classList.toggle("training", state.training);
-    renderSummary(); renderTable(); renderDay(); updateLabelStats();
-  }
-  function exportLabels() {
-    var payload = { schema: 1, exported_at: new Date().toISOString(), labels: {} };
-    Object.keys(state.labels).forEach(function (k) { if (state.labels[k]) payload.labels[k] = state.labels[k]; });
-    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a"); a.href = url; a.download = "labels.json";
-    document.body.appendChild(a); a.click();
-    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 0);
-  }
+  function toggleTraining() {}
+  function exportLabels() {}
   function step(dir) {
     var rows = filteredRows(); if (!rows.length) return;
     var idx = -1; for (var i = 0; i < rows.length; i++) if (rows[i].e.id === state.selId) { idx = i; break; }
@@ -675,7 +708,7 @@
   }
   function togglePlay() { if (audio) { if (audio.paused) { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } else audio.pause(); } }
   function onKey(ev) {
-    if (!state.training) return;
+    if (state.mode !== "label") return;
     var t = ev.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
     var opts = labelOptions();
@@ -706,7 +739,10 @@
         '<div class="eyebrow">Acoustic detection report</div>' +
         '<div class="h1">Dog-barking evidence</div>' +
         '<div class="sub">' + esc(range) + ' \u00b7 ' + esc(R.timezone || "") + '</div>' +
-        '<button class="switch" data-action="toggleTraining" aria-pressed="' + (state.training ? "true" : "false") + '" title="Toggle training / labeling mode"><span class="knob"></span><span class="lbl">Training mode</span></button>' +
+        (state.mode === "label"
+          ? '<div class="modeind label" title="Labels are saved to the database as you go"><span class="md"></span>Labeling \u2014 saved to database</div>'
+          : '<div class="modeind readonly" title="No label database reachable; showing stored results only"><span class="md"></span>Read-only</div>') +
+        '<div class="savenote" id="savenote"></div>' +
       '</div>' +
       '<div class="stats">' +
         stat(R.event_count != null ? R.event_count : R.events.length, "Detections", "") +
@@ -833,7 +869,7 @@
             kv("Rel. intensity", fmtRel(selEv.intensity_relative)) +
           '</div>' +
           audioHtml(selEv) +
-          (state.training ? labelBlock(selEv) : "") +
+          (state.mode === "label" ? labelBlock(selEv) : "") +
         '</div>';
     }
 
@@ -1092,6 +1128,8 @@
   }
 
   function bindControls() {
+    if (state._bound) return; // idempotent: never double-bind if load()/boot() re-runs
+    state._bound = true;
     // populate class select
     var sel = $("#f-cls");
     classes.forEach(function (c) { var o = document.createElement("option"); o.value = c; o.textContent = c; sel.appendChild(o); });
@@ -1126,9 +1164,7 @@
       if (lt) { toggleLabel(lt.getAttribute("data-key"), lt.getAttribute("data-id")); return; }
       if (!el) return;
       var a = el.getAttribute("data-action");
-      if (a === "toggleTraining") { toggleTraining(); return; }
-      else if (a === "exportLabels") { exportLabels(); return; }
-      else if (a === "toggleSortDir") { state.sortDir *= -1; applySort(); return; }
+      if (a === "toggleSortDir") { state.sortDir *= -1; applySort(); return; }
       else if (a === "selectDay") selectDay(el.getAttribute("data-date"));
       else if (a === "selectEvent") selectEvent(el.getAttribute("data-id"), false);
       else if (a === "playEvent") { ev.stopPropagation(); selectEvent(el.getAttribute("data-id"), true); }
@@ -1153,7 +1189,8 @@
     R.recordings = R.recordings || [];
     offMin = detectOff();
     classes = R.events.map(function (e) { return e.class; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).sort();
-    state.labels = loadLabels();
+    // labels come from the API (authoritative) when reachable; otherwise read-only
+    state.labels = (state.mode === "label" && state.apiLabels) ? state.apiLabels : {};
 
     // default selected day: first day with events, else first recorded day, else first month day
     if (R.daily_summary.length) state.selDate = R.daily_summary[0].date;
@@ -1173,6 +1210,7 @@
     renderIdentification();
     updateLabelStats();
     syncSortUI();
+    if (state.mode === "label") $("#root").classList.add("labeling");
 
     $("#loading").hidden = true;
     $("#root").hidden = false;

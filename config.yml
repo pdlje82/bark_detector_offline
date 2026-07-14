@@ -14,6 +14,14 @@ run:
     - identify
     - export
     - publish
+  reprocess: false            # true = re-analyze ALL recordings (re-cut snippets/embeddings),
+                              # preserving labels; use after changing snippet settings
+
+# Local labeling server (python -m barkdetect serve). The frontend reads/writes
+# human labels directly in barks.db via this server; localhost-only by default.
+serve:
+  host: 127.0.0.1
+  port: 8000
 
 paths:
   # Base dir that the relative paths below resolve against. Set this to your
@@ -78,7 +86,7 @@ identification:
   enabled: true
   embedding: librosa            # librosa | panns | aves  (swappable)
   classifier: logreg            # logreg | knn
-  min_labels_per_dog: 8         # need at least this many labels per dog before training
+  min_labels_per_dog: 5         # need at least this many labels per dog before training
   labels_path: data/labels.json # where the website's exported labels are dropped
   model_path: data/models/dog_clf.joblib
   dogs:                         # roster — REAL NAMES (fill these in)
