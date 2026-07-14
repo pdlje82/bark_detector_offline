@@ -1,0 +1,119 @@
+# Bark Detector Offline — FINE-SEGMENTATION experiment config
+#
+# A parallel dataset for trying finer clip segmentation WITHOUT touching the
+# main dataset or its labels. Everything lives under a separate paths.root
+# (D:/Projects/dog_bark_fine), so the main DB/labels at D:/Projects/dog_bark
+# are never opened by this config.
+#
+#   Run:  BARKDETECT_CONFIG=config-fine.yml python -m barkdetect
+#   Label/compare:  BARKDETECT_CONFIG=config-fine.yml python -m barkdetect serve
+#
+# Only paths.root, detection.{merge_gap_seconds,min_event_seconds}, and
+# serve.port differ from config.yml.
+
+run:
+  source: "D:/Projects/dog_bark/temp_input"   # same raw recordings as the main config
+  steps:
+    - ingest
+    - analyze
+    - identify
+    - export
+    - publish
+  reprocess: false
+
+# Different port so you can serve BOTH datasets at once and compare side by side.
+serve:
+  host: 127.0.0.1
+  port: 8001
+
+paths:
+  root: "D:/Projects/dog_bark_fine"   # separate dataset root — main data untouched
+  archive_dir: data/archive
+  snippets_dir: data/snippets
+  db_path: data/barks.db
+  export_dir: data/export
+  site_dir: data/site
+
+timezone: Europe/Berlin
+
+model:
+  device: cpu
+  name: "PANNs Cnn14_DecisionLevelMax"
+  version: audioset
+  checkpoint_path: null
+
+audio:
+  sample_rate: 32000
+  window_seconds: 60
+  min_window_seconds: 1.0
+
+normalization:
+  enabled: true
+  target_peak: 0.9
+  max_gain: 20.0
+  noise_floor: 0.005
+
+detection:
+  threshold: 0.15
+  min_event_seconds: 0.10     # FINER: keep briefer single barks (was 0.15)
+  merge_gap_seconds: 0.15     # FINER: split rapid barks instead of merging (was 0.4)
+  dog_classes:
+    - Dog
+    - Bark
+    - Bow-wow
+    - Yip
+    - Howl
+    - Growling
+    - Whimper (dog)
+
+intensity:
+  metric: rms
+  scope: per_file
+
+identification:
+  enabled: true
+  embedding: librosa
+  classifier: logreg
+  min_labels_per_dog: 5
+  labels_path: data/labels.json
+  model_path: data/models/dog_clf.joblib
+  dogs:
+    - Socke
+    - Clooney
+    - Zareth
+    - Pastor
+    - Podenco
+    - Podenca
+    - PerroCarmen
+    - PerroLejano
+
+ingest:
+  file_extensions: [".mp3"]
+  timestamp_source_label: sdcard_ctime
+  hash_prefix_len: 12
+  archive_name_template: "{start}_{hash}_{name}"
+  hash_chunk_bytes: 1048576
+  clock_drift_warn_seconds: 120
+
+snippets:
+  padding_seconds: 2.0
+  quality: 5
+  codec: libmp3lame
+  channels: 1
+  extension: mp3
+  name_template: "{date}_{time}_{ms}_{dbfs}"
+  normalize: true
+  normalize_target_lufs: -16.0
+
+coverage:
+  merge_gap_seconds: 5.0
+  night_start_hour: 22
+  night_end_hour: 6
+
+export:
+  filename: results.json
+
+logging:
+  level: INFO
+  progress_bar: true
+  log_file: data/processing.log
