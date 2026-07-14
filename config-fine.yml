@@ -76,7 +76,7 @@ onset:
   use_onset_detection: true
   min_interval_seconds: 0.12
   delta: 0.07
-  debug_plots: true
+  debug_plots: false
   debug_plots_dir: data/onset_debug
   debug_plots_max: 150
 
