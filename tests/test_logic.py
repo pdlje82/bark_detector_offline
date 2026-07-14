@@ -155,16 +155,20 @@ def test_export_includes_identity(tmp_path):
     from barkdetect.export import build_export
     cfg = Config.load(str(_REPO / "config.yml"))
     store = Store(tmp_path / "t.db")
+    import json as _json
     _seed_events_with_embeddings(store, [("k0", "rex"), ("k1", "bella")])
-    store.set_event_prediction(1, "rex", None, "human")
-    store.set_event_prediction(2, "bella", 0.77, "predicted")
+    # event 1 = a human multi-dog label (both rex and bella heard)
+    store.set_event_prediction(1, "rex", _json.dumps(["rex", "bella"]), None, "human")
+    store.set_event_prediction(2, "bella", None, 0.77, "predicted")
     data = build_export(cfg, store)
     assert data["schema_version"] == 2
     assert isinstance(data["dogs"], list)
     e0 = data["events"][0]
-    assert set(["key", "dog_label", "dog_confidence", "dog_label_source"]).issubset(e0)
-    assert "by_dog" in data["daily_summary"][0]
-    assert data["daily_summary"][0]["by_dog"].get("rex", 0) >= 1
+    assert set(["key", "dog_label", "dog_labels", "dog_confidence", "dog_label_source"]).issubset(e0)
+    assert e0["dog_labels"] == ["rex", "bella"]          # multi-dog preserved
+    assert e0["dog_label"] == "rex"                       # primary for back-compat
+    by_dog = data["daily_summary"][0]["by_dog"]
+    assert by_dog.get("rex", 0) >= 1 and by_dog.get("bella", 0) >= 1   # both credited
 
 
 def test_publish_bundle(tmp_path):

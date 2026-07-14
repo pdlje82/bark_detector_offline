@@ -64,7 +64,13 @@ def build_export(cfg, store: Store) -> dict:
         raw = e["intensity_raw"]
         ref = file_max[e["recording_id"]] if per_file else global_max
         rel = round(raw / ref, 4) if (raw is not None and ref) else None
-        dog_label = e["dog_label"]
+        # resolved dog(s): explicit list when a human labelled multiple, else the single label
+        if e["dog_labels"]:
+            dog_labels = json.loads(e["dog_labels"])
+        elif e["dog_label"]:
+            dog_labels = [e["dog_label"]]
+        else:
+            dog_labels = []
         event_list.append({
             "id": e["id"],
             "key": e["event_key"],
@@ -79,7 +85,8 @@ def build_export(cfg, store: Store) -> dict:
             "night": night,
             "intensity_relative": rel,
             "intensity_dbfs": _dbfs(raw) if raw is not None else None,
-            "dog_label": dog_label,
+            "dog_label": e["dog_label"],          # primary/first (back-compat)
+            "dog_labels": dog_labels,             # full list (>=1 when attributed)
             "dog_confidence": e["dog_confidence"],
             "dog_label_source": e["dog_label_source"],
             "snippet_url": f"snippets/{e['snippet_path']}" if e["snippet_path"] else None,
@@ -90,8 +97,9 @@ def build_export(cfg, store: Store) -> dict:
         d["total_bark_seconds"] += e["duration_sec"]
         if night:
             d["night_count"] += 1
-        if dog_label and dog_label not in NON_DOG_LABELS:
-            d["by_dog"][dog_label] += 1
+        for dog in dog_labels:                    # credit every attributed dog
+            if dog not in NON_DOG_LABELS:
+                d["by_dog"][dog] += 1
 
     daily_summary = [
         {"date": day,

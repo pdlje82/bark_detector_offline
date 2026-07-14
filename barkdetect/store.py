@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS bark_events (
     snippet_path     TEXT,              -- relative to snippets_dir
     event_key        TEXT,              -- stable id (sha12_offsetms) for label joins
     embedding        TEXT,              -- JSON float array (bark fingerprint) for identification
-    dog_label        TEXT,              -- resolved dog (human or predicted)
+    dog_label        TEXT,              -- primary resolved dog (human or predicted)
+    dog_labels       TEXT,              -- JSON array when a human labelled multiple dogs; else null
     dog_confidence   REAL,              -- prediction confidence (null for human labels)
     dog_label_source TEXT               -- 'human' | 'predicted' | null
 );
@@ -75,7 +76,8 @@ MIGRATIONS = {
     "recordings": {"mtime_utc": "TEXT", "parameters_json": "TEXT"},
     "bark_events": {
         "intensity_raw": "REAL", "event_key": "TEXT", "embedding": "TEXT",
-        "dog_label": "TEXT", "dog_confidence": "REAL", "dog_label_source": "TEXT",
+        "dog_label": "TEXT", "dog_labels": "TEXT", "dog_confidence": "REAL",
+        "dog_label_source": "TEXT",
     },
 }
 
@@ -213,12 +215,17 @@ class Store:
         return cur.fetchall()
 
     def set_event_prediction(self, event_id: int, dog_label: str | None,
-                             confidence: float | None, source: str | None):
-        """Store the resolved dog label + source (+ confidence) on an event."""
+                             dog_labels: str | None, confidence: float | None,
+                             source: str | None):
+        """Store the resolved dog label(s) + source (+ confidence) on an event.
+
+        `dog_label` is the primary/first dog; `dog_labels` is a JSON array only
+        when a human labelled multiple dogs (else null).
+        """
         self.conn.execute(
-            "UPDATE bark_events SET dog_label=?, dog_confidence=?, dog_label_source=? "
-            "WHERE id=?",
-            (dog_label, confidence, source, event_id),
+            "UPDATE bark_events SET dog_label=?, dog_labels=?, dog_confidence=?, "
+            "dog_label_source=? WHERE id=?",
+            (dog_label, dog_labels, confidence, source, event_id),
         )
 
     # --- meta key/value --------------------------------------------------

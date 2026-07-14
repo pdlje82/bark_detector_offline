@@ -26,6 +26,30 @@ log = logging.getLogger(__name__)
 NON_DOG_LABELS = {"unsure", "multiple", "not_a_dog"}
 
 
+def _label_to_list(raw: str | None) -> list[str]:
+    """Normalize a stored label into a list. Multi-dog labels are stored as JSON."""
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            return [str(x) for x in json.loads(raw)]
+        except (ValueError, TypeError):
+            return [raw]
+    return [raw]
+
+
+def _canonical_label(value) -> str:
+    """Turn a labels.json value (string or list) into the stored form.
+
+    A single-item list collapses to a plain string; a multi-item list is stored
+    as a JSON array so it round-trips through the single-column table.
+    """
+    if isinstance(value, list):
+        items = [str(x) for x in value]
+        return items[0] if len(items) == 1 else json.dumps(items, ensure_ascii=False)
+    return str(value)
+
+
 def _ingest_labels(cfg, store: Store) -> int:
     """Load labels.json (if present) into the event_labels table. Returns count."""
     path = cfg.resolve_path(cfg.identification.labels_path)
@@ -35,8 +59,8 @@ def _ingest_labels(cfg, store: Store) -> int:
     data = json.loads(path.read_text(encoding="utf-8"))
     labels = data.get("labels", {})
     now = datetime.now(timezone.utc).isoformat()
-    for key, label in labels.items():
-        store.upsert_label(key, str(label), "human", now)
+    for key, value in labels.items():
+        store.upsert_label(key, _canonical_label(value), "human", now)
     store.commit()
     log.info("  ingested %d human labels from %s", len(labels), path)
     return len(labels)
@@ -92,10 +116,12 @@ def _train(cfg, store: Store, labels: dict[str, str]):
     rows = store.events_with_embeddings()
     X, y = [], []
     for r in rows:
-        lbl = labels.get(r["event_key"])
-        if lbl and lbl not in NON_DOG_LABELS:
+        names = _label_to_list(labels.get(r["event_key"]))
+        dogs = [n for n in names if n not in NON_DOG_LABELS]
+        # train only on clean single-dog examples; multi-dog & non-dog are excluded
+        if len(names) == 1 and len(dogs) == 1:
             X.append(np.asarray(json.loads(r["embedding"]), dtype=np.float32))
-            y.append(lbl)
+            y.append(dogs[0])
 
     counts = Counter(y)
     min_n = cfg.identification.min_labels_per_dog
@@ -149,19 +175,21 @@ def _predict_all(store: Store, labels: dict[str, str], model):
     rows = store.events_with_embeddings()
     n_human = n_pred = 0
     for r in rows:
-        human = labels.get(r["event_key"])
-        if human:
-            store.set_event_prediction(r["id"], human, None, "human")
+        names = _label_to_list(labels.get(r["event_key"]))
+        if names:                                   # human label wins (may be multiple)
+            primary = names[0]
+            multi = json.dumps(names, ensure_ascii=False) if len(names) > 1 else None
+            store.set_event_prediction(r["id"], primary, multi, None, "human")
             n_human += 1
-        elif model is not None:
+        elif model is not None:                     # model predicts a single dog
             vec = np.asarray(json.loads(r["embedding"]), dtype=np.float32).reshape(1, -1)
             proba = model.predict_proba(vec)[0]
             k = int(np.argmax(proba))
-            store.set_event_prediction(r["id"], str(model.classes_[k]),
+            store.set_event_prediction(r["id"], str(model.classes_[k]), None,
                                        round(float(proba[k]), 4), "predicted")
             n_pred += 1
         else:
-            store.set_event_prediction(r["id"], None, None, None)
+            store.set_event_prediction(r["id"], None, None, None, None)
     store.commit()
     log.info("  resolved dogs: %d human, %d predicted", n_human, n_pred)
 

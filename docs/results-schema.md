@@ -80,7 +80,8 @@ not "no barking".
 | `night` | bool | Fell in the night window. |
 | `intensity_relative` | float 0..1 \| null | Loudness relative to the loudest bark in scope (1.0 = loudest). |
 | `intensity_dbfs` | float \| null | Absolute loudness in dBFS (comparable across files). |
-| `dog_label` | string \| null | Resolved dog: a roster name, or `unsure`/`multiple`/`not_a_dog`, or null. |
+| `dog_label` | string \| null | **Primary** resolved dog (first of `dog_labels`) — kept for back-compat. A roster name, `unsure`/`multiple`/`not_a_dog`, or null. |
+| `dog_labels` | array of string | All attributed labels. Usually one; **two or more** when a human labelled multiple dogs in the clip. `[]` if unattributed. Counts credit each dog. |
 | `dog_confidence` | float 0..1 \| null | Model confidence when predicted; null for human labels. |
 | `dog_label_source` | string \| null | `human` (confirmed by a listener) or `predicted` (model suggestion) or null. **Render `predicted` as a suggestion, never as fact.** |
 | `snippet_url` | string \| null | Path to the playable clip, relative to `results.json` (e.g. `snippets/<hash>/<name>.mp3`). |
@@ -119,13 +120,18 @@ and predicts a dog for every event.
   "schema": 1,
   "exported_at": "2026-07-13T21:00:00Z",
   "labels": {
-    "<event.key.a>": "rex",
-    "<event.key.b>": "not_a_dog"
+    "<event.key.a>": "Podenco",
+    "<event.key.b>": ["Podenco", "Clooney"],
+    "<event.key.c>": "not_a_dog"
   }
 }
 ```
-`labels` maps each event's stable `key` to a label ∈ the `dogs` roster ∪
-{`unsure`, `multiple`, `not_a_dog`}. Human labels always override predictions.
+`labels` maps each event's stable `key` to **either a single label (string) or a
+list of dog names** when more than one dog is audible. Each value is a roster name
+(or list of them) ∪ {`unsure`, `multiple`, `not_a_dog`}. Human labels always
+override predictions. Note: multi-dog clips are **excluded from classifier
+training** (a mixture isn't a clean single-dog example) but still count toward
+each named dog's totals.
 
 ## Serving
 

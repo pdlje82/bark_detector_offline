@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-07-14T00:03:48.960227+00:00",
+  "generated_at": "2026-07-14T00:37:16.696031+00:00",
   "timezone": "Europe/Berlin",
   "dogs": [
     "Socke",
@@ -167,7 +167,7 @@
       "night_count": 3,
       "by_dog": {
         "Podenco": 2,
-        "Clooney": 1
+        "Clooney": 2
       }
     },
     {
@@ -197,6 +197,10 @@
       "intensity_relative": 1.0,
       "intensity_dbfs": -4.3,
       "dog_label": "Podenco",
+      "dog_labels": [
+        "Podenco",
+        "Clooney"
+      ],
       "dog_confidence": null,
       "dog_label_source": "human",
       "snippet_url": "snippets/a1b2c3d4e5f6/050726_223200_000120500_-4dBFS.mp3"
@@ -216,6 +220,9 @@
       "intensity_relative": 0.9016,
       "intensity_dbfs": -5.2,
       "dog_label": "Podenco",
+      "dog_labels": [
+        "Podenco"
+      ],
       "dog_confidence": 0.82,
       "dog_label_source": "predicted",
       "snippet_url": "snippets/a1b2c3d4e5f6/050726_223201_000121400_-5dBFS.mp3"
@@ -235,6 +242,9 @@
       "intensity_relative": 0.3279,
       "intensity_dbfs": -14.0,
       "dog_label": "Clooney",
+      "dog_labels": [
+        "Clooney"
+      ],
       "dog_confidence": 0.63,
       "dog_label_source": "predicted",
       "snippet_url": "snippets/a1b2c3d4e5f6/050726_224540_000940000_-14dBFS.mp3"
@@ -254,6 +264,9 @@
       "intensity_relative": 0.1446,
       "intensity_dbfs": -18.4,
       "dog_label": "Clooney",
+      "dog_labels": [
+        "Clooney"
+      ],
       "dog_confidence": null,
       "dog_label_source": "human",
       "snippet_url": "snippets/b7c8d9e0f1a2/060726_010505_000305200_-18dBFS.mp3"
@@ -273,6 +286,9 @@
       "intensity_relative": 1.0,
       "intensity_dbfs": -1.6,
       "dog_label": "Podenco",
+      "dog_labels": [
+        "Podenco"
+      ],
       "dog_confidence": 0.91,
       "dog_label_source": "predicted",
       "snippet_url": "snippets/b7c8d9e0f1a2/060726_013010_001810900_-2dBFS.mp3"

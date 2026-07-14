@@ -132,6 +132,35 @@ per-dog predictions are.
 > cross-validated accuracy is the reliable figure. Use only fields in
 > `docs/results-schema.md`. Do not touch backend files.
 
+## Multi-dog labeling (update)
+
+Paste this to upgrade the single-select labeling control to allow tagging more
+than one dog per clip (some clips contain two dogs barking).
+
+> Change the per-event labeling control from a single dropdown to a **multi-select**
+> so a clip can be tagged with **one or more** dogs. Use checkboxes (or a
+> multi-select) listing every name in `RESULTS.dogs`, plus three **mutually
+> exclusive** single options: `Unsure`, `Multiple dogs`, `Not a dog`. Rules:
+> - selecting one or more dog names is allowed and encouraged when two dogs bark;
+> - selecting a special option (`Unsure`/`Multiple`/`Not a dog`) clears any dog
+>   selections and vice-versa (specials are exclusive, never combined with names).
+>
+> Store the label in `localStorage` as before, but the value is now **a string
+> when one dog/option is chosen, or an array of names when several dogs are
+> chosen** — e.g. `"Podenco"`, `["Podenco","Clooney"]`, or `"not_a_dog"`. The
+> "Export labels" file keeps the same shape; values may be strings or arrays:
+> ```json
+> { "schema": 1, "exported_at": "<ISO>",
+>   "labels": { "<key.a>": "Podenco", "<key.b>": ["Podenco","Clooney"] } }
+> ```
+>
+> When **displaying** an event, read `event.dog_labels` (an array; may hold 2+
+> names for human multi-labels) and render all of them as chips/tags; fall back to
+> `event.dog_label` for older data. Keep the confirmed-vs-suggested styling per
+> `dog_label_source`. Predictions remain single-dog (the model never returns
+> multiple) — only human labels can have several. Use only fields in
+> `docs/results-schema.md`; don't touch backend files.
+
 ## After the prototype
 
 When the look is right, ask for the production version: identical UI but with the
