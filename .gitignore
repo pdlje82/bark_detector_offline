@@ -2,6 +2,7 @@
 data/
 *.mp3
 *.wav
+*.zip
 
 # Python
 __pycache__/
