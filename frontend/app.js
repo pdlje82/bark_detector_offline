@@ -424,9 +424,26 @@
   // ==========================================================
   // RENDER: CALENDAR
   // ==========================================================
+  // Per-day {count, night} computed from events passing the content filters
+  // (night/class/status/dog/conf/intensity/burst) — but NOT "selected day only",
+  // so the calendar keeps showing every day's filtered total.
+  function filteredDayCounts() {
+    var m = {};
+    R.events.forEach(function (e) {
+      if (!eventMatches(e)) return;
+      var d = wall(e.abs_start_local).date;
+      var o = m[d] || (m[d] = { count: 0, night: 0 });
+      o.count++; if (e.night) o.night++;
+    });
+    return m;
+  }
+  // Re-render everything the content filters affect (calendar counts included).
+  function renderFiltered() { renderCalendar(); renderDay(); renderTable(); }
+
   function renderCalendar() {
     var months = monthRange();
-    var maxCount = Math.max.apply(null, [1].concat(R.daily_summary.map(function (d) { return d.count; })));
+    var dayCounts = filteredDayCounts();
+    var maxCount = Math.max.apply(null, [1].concat(Object.keys(dayCounts).map(function (k) { return dayCounts[k].count; })));
     var html = '<div class="cal-head"><h2 class="sec">Calendar</h2><span class="lead">tap a recorded day</span></div>';
     months.forEach(function (mo) {
       var first = new Date(Date.UTC(mo.year, mo.month - 1, 1));
@@ -439,9 +456,9 @@
       for (var d = 1; d <= dim; d++) {
         var dateStr = mo.year + "-" + pad2(mo.month) + "-" + pad2(d);
         var rec = covOverlapsDay(dateStr);
-        var sum = daySummary(dateStr);
-        var count = sum ? sum.count : 0;
-        var night = sum ? sum.night_count : 0;
+        var fc = dayCounts[dateStr];
+        var count = fc ? fc.count : 0;
+        var night = fc ? fc.night : 0;
         var sel = dateStr === state.selDate;
         var cls = "cell" + (rec ? " rec" : "") + (sel ? " sel" : "");
         var bg = rec ? countColor(count, maxCount) : "transparent";
@@ -1031,16 +1048,16 @@
     var dogSel = $("#f-dog");
     labelOptions().forEach(function (o) { var op = document.createElement("option"); op.value = o.id; op.textContent = o.name; dogSel.appendChild(op); });
 
-    $("#f-night").addEventListener("change", function (e) { state.filters.night = e.target.checked; renderTable(); renderDay(); });
+    $("#f-night").addEventListener("change", function (e) { state.filters.night = e.target.checked; renderFiltered(); });
     $("#f-day").addEventListener("change", function (e) { state.filters.dayOnly = e.target.checked; renderTable(); });
-    sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); renderDay(); });
-    $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); renderDay(); });
-    $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); renderDay(); });
-    $("#f-burstgap").addEventListener("input", function (e) { state.filters.burstGap = parseFloat(e.target.value); $("#f-burstgap-v").textContent = state.filters.burstGap.toFixed(1) + "s"; computeBursts(); renderTable(); renderDay(); });
-    $("#f-minburst").addEventListener("input", function (e) { state.filters.minBurst = parseInt(e.target.value, 10); $("#f-minburst-v").textContent = String(state.filters.minBurst); renderTable(); renderDay(); });
+    sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderFiltered(); });
+    $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderFiltered(); });
+    $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderFiltered(); });
+    $("#f-burstgap").addEventListener("input", function (e) { state.filters.burstGap = parseFloat(e.target.value); $("#f-burstgap-v").textContent = state.filters.burstGap.toFixed(1) + "s"; computeBursts(); renderFiltered(); });
+    $("#f-minburst").addEventListener("input", function (e) { state.filters.minBurst = parseInt(e.target.value, 10); $("#f-minburst-v").textContent = String(state.filters.minBurst); renderFiltered(); });
     $("#f-groupburst").addEventListener("change", function (e) { state.filters.groupBurst = e.target.checked; renderTable(); });
-    $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderTable(); renderDay(); });
-    $("#f-dog").addEventListener("change", function (e) { state.filters.dog = e.target.value; renderTable(); renderDay(); });
+    $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderFiltered(); });
+    $("#f-dog").addEventListener("change", function (e) { state.filters.dog = e.target.value; renderFiltered(); });
     $("#f-sort").addEventListener("change", function (e) { state.sortKey = e.target.value; applySort(); });
 
     $("#root").addEventListener("change", function (ev) {
