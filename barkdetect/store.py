@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS event_labels (
     labeled_at TEXT
 );
 
+-- Small key/value store for pipeline artifacts (e.g. identification metrics JSON).
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 """
 
 # Indexes are created AFTER column migration (they may reference newly-added columns).
@@ -214,3 +220,18 @@ class Store:
             "WHERE id=?",
             (dog_label, confidence, source, event_id),
         )
+
+    # --- meta key/value --------------------------------------------------
+    def set_meta(self, key: str, value: str):
+        """Store a string value under key (upsert)."""
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+    def get_meta(self, key: str) -> str | None:
+        """Return the stored string for key, or None."""
+        cur = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,))
+        row = cur.fetchone()
+        return row["value"] if row else None

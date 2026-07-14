@@ -126,11 +126,11 @@ def test_identify_train_and_predict(tmp_path):
     store.commit()
 
     cfg = SimpleNamespace(identification=SimpleNamespace(
-        min_labels_per_dog=3, classifier="logreg",
+        min_labels_per_dog=3, classifier="logreg", embedding="librosa",
         model_path=str(tmp_path / "clf.joblib")),
         resolve_path=lambda p: tmp_path / str(p))
     labels = store.all_labels()
-    model = _train(cfg, store, labels)
+    model, metrics = _train(cfg, store, labels)
     assert model is not None
     _predict_all(store, labels, model)
 
@@ -139,6 +139,13 @@ def test_identify_train_and_predict(tmp_path):
     assert evs["k_new_0"]["dog_label_source"] == "predicted"
     assert evs["k_new_0"]["dog_label"] in {"rex", "bella"}
     assert 0.0 <= evs["k_new_0"]["dog_confidence"] <= 1.0
+
+    # cross-validation metrics + confusion matrix
+    assert metrics["trained"] and metrics["cv_available"]
+    assert set(metrics["per_dog"]) == {"rex", "bella"}
+    assert metrics["labels"] == ["bella", "rex"]
+    assert len(metrics["confusion_matrix"]) == 2 and len(metrics["confusion_matrix"][0]) == 2
+    assert 0.0 <= metrics["accuracy"] <= 1.0
 
 
 def test_export_includes_identity(tmp_path):

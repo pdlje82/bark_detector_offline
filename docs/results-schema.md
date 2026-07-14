@@ -16,6 +16,7 @@ of coverage/gaps are in the file's `timezone`. Durations are seconds (float).
 | `generated_at` | string (UTC) | When this file was exported. |
 | `timezone` | string | IANA zone for all local times (e.g. `Europe/Berlin`). |
 | `dogs` | array of string | The dog roster (real names) — options for the labeling dropdown. |
+| `identification_metrics` | object \| null | How reliable the dog classifier is (see below). `null` until trained. |
 | `parameters` | object | Settings that produced this export (see below) — for provenance. |
 | `recording_count` | int | Number of source recordings. |
 | `event_count` | int | Number of bark events. |
@@ -83,6 +84,29 @@ not "no barking".
 | `dog_confidence` | float 0..1 \| null | Model confidence when predicted; null for human labels. |
 | `dog_label_source` | string \| null | `human` (confirmed by a listener) or `predicted` (model suggestion) or null. **Render `predicted` as a suggestion, never as fact.** |
 | `snippet_url` | string \| null | Path to the playable clip, relative to `results.json` (e.g. `snippets/<hash>/<name>.mp3`). |
+
+## `identification_metrics` (dog-classifier reliability)
+
+`null` until a classifier has been trained. When present:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `trained` | bool | Whether a model was trained. If `false`, see `reason` + `label_counts`. |
+| `trained_at` | string (UTC) | When the model was trained. |
+| `classifier` / `embedding` | string | The classifier + embedding backend used. |
+| `dogs` | array | Dogs the model can distinguish (those above `min_labels_per_dog`). |
+| `n_labeled` | int | Number of labeled examples used for training. |
+| `label_counts` | object | `{ dog: count }` of all human labels (incl. dogs below the threshold). |
+| `cv_available` | bool | Whether cross-validation was possible (needs ≥2 examples/dog). |
+| `cv_folds` | int | Number of stratified folds used. |
+| `accuracy` | float 0..1 | **Cross-validated** accuracy on held-out labels (the headline reliability figure). |
+| `labels` | array | Row/column order of the confusion matrix. |
+| `confusion_matrix` | 2-D int array | `matrix[i][j]` = true `labels[i]` predicted as `labels[j]`. Diagonal = correct. |
+| `per_dog` | object | Per-dog `{ precision, recall, f1, support }` from cross-validation. |
+
+These are **honest held-out estimates**, not resubstitution. Present accuracy and
+the confusion matrix as the reliability of the *suggested* per-dog attribution;
+human-confirmed labels are unaffected by model quality.
 
 ## `labels.json` (frontend → backend)
 

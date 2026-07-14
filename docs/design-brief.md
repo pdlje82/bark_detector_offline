@@ -104,6 +104,34 @@ so residents can teach the system to tell the dogs apart.
 > Conform to `docs/results-schema.md` (v2); use only fields defined there. Do not
 > touch backend files.
 
+## Classifier reliability panel (`identification_metrics`)
+
+Paste this once the training-mode UI exists, to show *how trustworthy* the
+per-dog predictions are.
+
+> Add a **"Dog identification reliability"** panel driven by
+> `RESULTS.identification_metrics` (may be `null` — if so, show "No dog model
+> trained yet — label more clips to enable it." and stop).
+>
+> When `trained` is `false`, show `reason` and the `label_counts` so the user
+> knows which dogs still need labels (e.g. "Clooney: 4 / 8"). When `trained` is
+> `true`, show:
+> - a headline **cross-validated accuracy** (`accuracy`, e.g. "82% accurate on
+>   held-out labels, N-fold"), clearly labelled as an estimate of the *suggested*
+>   predictions' reliability — not of human-confirmed labels;
+> - a **confusion matrix** rendered as a heatmap/table: rows = true dog, columns =
+>   predicted dog, using `labels` for order and `confusion_matrix` for values;
+>   diagonal = correct. Color cells by value; make off-diagonal (confusions)
+>   visually obvious;
+> - a small **per-dog table** from `per_dog`: precision, recall, F1, support (n).
+>
+> Wording must stay honest: this measures the *model's* guesses. Predictions in
+> the event table already carry `dog_confidence` (per-event, 0–1) — show it next
+> to `predicted` labels (e.g. "Podenco · 72%"), muted, and note in a tooltip that
+> per-event confidence is an over-confident raw score, while the panel's
+> cross-validated accuracy is the reliable figure. Use only fields in
+> `docs/results-schema.md`. Do not touch backend files.
+
 ## After the prototype
 
 When the look is right, ask for the production version: identical UI but with the

@@ -64,8 +64,11 @@ beyond the existing `fetch('./results.json')`.
   or *relabeled* = the human label differs from the suggestion (amber). The
   header shows running `confirmed · relabeled · unlabeled` counts, and the
   calendar marks each day as fully or partly reviewed.
-- **Status filter** — a Status dropdown (All / Labeled / Unlabeled / Confirmed /
-  Relabeled) narrows the event log.
+- **Filters & sort** — a Status dropdown (All / Labeled / Unlabeled / Confirmed /
+  Relabeled), a Dog dropdown (filter by the assigned label — combines with
+  status), and a Sort control (Time / Confidence / Intensity / Duration / Class,
+  with a direction toggle). All event filters and the sort apply to **both** the
+  event log and the day-detail timeline + "events in window" list.
 - **Speed** — keyboard shortcuts: `1`–`9`
   assign a roster option, `0` clears, `Space` plays/pauses the current clip,
   `J`/`K` (or `↓`/`↑`) step through events, and `N` jumps to the next unlabeled.
@@ -78,6 +81,25 @@ beyond the existing `fetch('./results.json')`.
 
 Labels live only in the browser (localStorage) and in the exported file; the
 page never writes back to `results.json` or the backend.
+
+## Dog identification reliability
+
+When the pipeline has trained a dog classifier, `results.json` carries an
+`identification_metrics` object; a panel surfaces it:
+
+- **Not present (`null`)** — shows "No dog model trained yet — label more clips
+  to enable it."
+- **`trained: false`** — shows the `reason` and per-dog `label_counts` progress
+  (e.g. "Cooper: 4 / 8 needed") so you can see which dogs still need labels.
+- **`trained: true`** — a headline cross-validated accuracy (`accuracy`,
+  `cv_folds`), stated as an estimate for the model's *suggested* predictions only
+  (human-confirmed labels are taken as given); a confusion-matrix heatmap (rows =
+  true dog, columns = predicted, diagonal = correct in green, confusions in red);
+  and a per-dog precision / recall / F1 / support table.
+
+Per-event `dog_confidence` still shows next to a predicted label in the log
+(e.g. "Rex · 82%"), muted, with a tooltip noting it is a raw, over-confident
+score — the panel's cross-validated accuracy is the reliable figure.
 
 ## Behaviour notes
 

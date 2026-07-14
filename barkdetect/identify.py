@@ -42,8 +42,53 @@ def _ingest_labels(cfg, store: Store) -> int:
     return len(labels)
 
 
+def _build_estimator(cfg, n_samples: int):
+    """Construct a fresh (unfitted) sklearn pipeline per config."""
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    if cfg.identification.classifier == "knn":
+        from sklearn.neighbors import KNeighborsClassifier
+        clf = KNeighborsClassifier(n_neighbors=max(1, min(5, n_samples // 3)))
+    else:
+        from sklearn.linear_model import LogisticRegression
+        clf = LogisticRegression(max_iter=1000, class_weight="balanced")
+    return make_pipeline(StandardScaler(), clf)
+
+
+def _cv_metrics(cfg, X, y, classes: list[str]) -> dict:
+    """Cross-validated accuracy, per-dog precision/recall/f1, and confusion matrix.
+
+    Uses held-out folds (honest estimate), not resubstitution. Needs >=2 examples
+    per dog to stratify; otherwise reports that CV was not possible.
+    """
+    counts = Counter(y)
+    min_count = min(counts.values())
+    if min_count < 2:
+        return {"cv_available": False,
+                "reason": "need >=2 examples per dog for cross-validation"}
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+    from sklearn.metrics import (accuracy_score, confusion_matrix,
+                                 precision_recall_fscore_support)
+    folds = int(min(5, min_count))
+    skf = StratifiedKFold(n_splits=folds, shuffle=True, random_state=0)
+    y_pred = cross_val_predict(_build_estimator(cfg, len(y)), np.asarray(X), y, cv=skf)
+    labels = sorted(classes)
+    p, r, f, s = precision_recall_fscore_support(y, y_pred, labels=labels, zero_division=0)
+    cm = confusion_matrix(y, y_pred, labels=labels)
+    per_dog = {lbl: {"precision": round(float(p[i]), 3), "recall": round(float(r[i]), 3),
+                     "f1": round(float(f[i]), 3), "support": int(s[i])}
+               for i, lbl in enumerate(labels)}
+    return {"cv_available": True, "cv_folds": folds,
+            "accuracy": round(float(accuracy_score(y, y_pred)), 3),
+            "labels": labels, "confusion_matrix": cm.tolist(), "per_dog": per_dog}
+
+
 def _train(cfg, store: Store, labels: dict[str, str]):
-    """Train a classifier on labeled embeddings. Returns (model, classes) or None."""
+    """Train + evaluate a classifier on labeled embeddings.
+
+    Returns (model, metrics). model is None (with a metrics dict explaining why)
+    when there aren't enough labels yet.
+    """
     rows = store.events_with_embeddings()
     X, y = [], []
     for r in rows:
@@ -51,40 +96,52 @@ def _train(cfg, store: Store, labels: dict[str, str]):
         if lbl and lbl not in NON_DOG_LABELS:
             X.append(np.asarray(json.loads(r["embedding"]), dtype=np.float32))
             y.append(lbl)
-    if not X:
-        log.info("  no usable dog labels yet — skipping training")
-        return None
 
     counts = Counter(y)
     min_n = cfg.identification.min_labels_per_dog
-    trainable = {d for d, n in counts.items() if n >= min_n}
+    trainable = sorted(d for d, n in counts.items() if n >= min_n)
+    below = {d: n for d, n in counts.items() if n < min_n}
+    if below:
+        log.info("  dogs below min_labels_per_dog(%d), not yet learned: %s", min_n, below)
+
     if len(trainable) < 2:
         log.info("  not enough labels to train: need >=%d each for >=2 dogs, have %s",
                  min_n, dict(counts))
-        return None
+        return None, {"trained": False,
+                      "reason": f"need >={min_n} labels for >=2 dogs",
+                      "label_counts": dict(counts)}
 
-    X = np.vstack([x for x, lbl in zip(X, y) if lbl in trainable])
-    y = [lbl for lbl in y if lbl in trainable]
+    Xt = np.vstack([x for x, lbl in zip(X, y) if lbl in trainable])
+    yt = [lbl for lbl in y if lbl in trainable]
 
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
-    if cfg.identification.classifier == "knn":
-        from sklearn.neighbors import KNeighborsClassifier
-        clf = KNeighborsClassifier(n_neighbors=min(5, len(y)))
-    else:
-        from sklearn.linear_model import LogisticRegression
-        clf = LogisticRegression(max_iter=1000, class_weight="balanced")
-    model = make_pipeline(StandardScaler(), clf)
-    model.fit(X, y)
+    model = _build_estimator(cfg, len(yt))
+    model.fit(Xt, yt)
 
     import joblib
     model_path = cfg.resolve_path(cfg.identification.model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_path)
+
+    metrics = {"trained": True,
+               "trained_at": datetime.now(timezone.utc).isoformat(),
+               "classifier": cfg.identification.classifier,
+               "embedding": cfg.identification.embedding,
+               "dogs": trainable,
+               "n_labeled": len(yt),
+               "label_counts": dict(counts),
+               **_cv_metrics(cfg, Xt, yt, trainable)}
     log.info("  trained %s on %d labels across %d dogs %s -> %s",
-             cfg.identification.classifier, len(y), len(trainable),
-             sorted(trainable), model_path)
-    return model
+             cfg.identification.classifier, len(yt), len(trainable), trainable, model_path)
+    if metrics.get("cv_available"):
+        log.info("  cross-validated accuracy: %.1f%% (%d-fold)",
+                 metrics["accuracy"] * 100, metrics["cv_folds"])
+        for d, m in metrics["per_dog"].items():
+            log.info("    %-14s precision %.2f  recall %.2f  (n=%d)",
+                     d, m["precision"], m["recall"], m["support"])
+        log.info("  confusion matrix (rows=true, cols=pred) %s:", metrics["labels"])
+        for lbl, row in zip(metrics["labels"], metrics["confusion_matrix"]):
+            log.info("    %-14s %s", lbl, row)
+    return model, metrics
 
 
 def _predict_all(store: Store, labels: dict[str, str], model):
@@ -116,6 +173,8 @@ def identify(cfg, store: Store) -> dict:
         return {"trained": False}
     _ingest_labels(cfg, store)
     labels = store.all_labels()
-    model = _train(cfg, store, labels)
+    model, metrics = _train(cfg, store, labels)
+    store.set_meta("identification_metrics", json.dumps(metrics, ensure_ascii=False))
+    store.commit()
     _predict_all(store, labels, model)
     return {"trained": model is not None, "labels": len(labels)}

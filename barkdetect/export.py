@@ -107,6 +107,8 @@ def build_export(cfg, store: Store) -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": cfg.timezone,
         "dogs": list(cfg.identification.dogs),   # roster for the labeling dropdown
+        "identification_metrics": json.loads(store.get_meta("identification_metrics"))
+            if store.get_meta("identification_metrics") else None,
         "parameters": cfg.params_snapshot(),   # current config used for this export
         "recording_count": len(recordings),
         "event_count": len(event_list),
