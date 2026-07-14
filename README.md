@@ -15,6 +15,7 @@ with each result, and the whole pipeline is reproducible and idempotent.
 ## Table of Contents
 
 - [Overview](#overview)
+- [Typical workflow (stage by stage)](#typical-workflow-stage-by-stage)
 - [Installation](#installation)
 - [Running the pipeline](#running-the-pipeline)
 - [How detection works (inference)](#how-detection-works-inference)
@@ -38,11 +39,68 @@ runs in order and is independently re-runnable:
 |------|--------------|
 | `ingest` | Read MP3s from the SD card, hash them, derive the recording start time from the card's creation timestamp, copy each into `data/archive/`. |
 | `analyze` | Stream each recording through **PANNs** (a pretrained audio-event model), detect bark events, measure per-event loudness, compute a per-event embedding, and cut a playable clip. |
-| `identify` | Ingest human labels (`labels.json`), train a lightweight per-dog classifier, and predict a dog for every event. |
+| `identify` | Read human labels from the DB, train a lightweight per-dog classifier, and predict a dog for every event. |
+| `serve` | Run the local labeling server (not part of a normal run — invoked as `python -m barkdetect serve`). |
 | `export` | Write `data/export/results.json`: events, coverage/gaps, daily summaries, per-dog counts, and provenance. |
 | `publish` | Assemble `data/site/` (frontend + results.json + clips) — the single, curated deploy unit. |
 
 Everything is **config-driven**: the program takes no command-line arguments.
+
+---
+
+## Typical workflow (stage by stage)
+
+The tool is used across a few distinct stages. Each links to its detailed section.
+
+### Stage 0 — One-time setup ([Installation](#installation))
+1. `mamba env create -f environment.yml` and activate it.
+2. Fetch the PANNs checkpoint (see the [checkpoint note](#the-panns-model-checkpoint-one-time-312-mb)).
+3. Edit `config.yml`: `run.source`, `paths.root`, `timezone`, and the
+   `identification.dogs` roster.
+
+### Stage 1 — Tune segmentation (do this *before* labeling)
+Detection boundaries depend on `detection.threshold`, `merge_gap_seconds`,
+`min_event_seconds`. Experiment on a small batch to find good values, listening to
+the clips. Each change re-segments and (once you have labels) triggers the
+[segmentation guard](#the-segmentation-guard). **Lock these before labeling a lot**,
+because changing them later orphans labels.
+```bash
+python -m barkdetect            # steps: [ingest, analyze, export, publish]
+python -m http.server -d data/site 8000   # listen to results
+```
+
+### Stage 2 — Ingest & analyze ([Running](#running-the-pipeline), [How detection works](#how-detection-works-inference))
+Plug in the SD card and run the pipeline. New files are copied, analyzed
+(bark events + loudness + embeddings), and clips are cut. Already-processed files
+are skipped.
+```bash
+python -m barkdetect            # ingest → analyze → identify → export → publish
+```
+
+### Stage 3 — Label the dogs ([Labeling](#labeling-the-local-label-server))
+Run the local server and label clips; labels save straight to the database.
+```bash
+python -m barkdetect serve      # open http://127.0.0.1:8000, turn on training mode
+```
+
+### Stage 4 — Train & review ([Training](#training-telling-the-dogs-apart))
+Re-run identification to train the per-dog model on your labels and refresh
+predictions + the reliability panel, then republish.
+```bash
+python -m barkdetect            # (or a subset: edit run.steps to [identify, export, publish])
+```
+
+### Stage 5 — Publish & share ([Publishing](#publishing-and-hosting))
+`publish` builds `data/site/` — the curated, read-only bundle for the lawyer/police.
+Serve it locally, or deploy it to an access-controlled host.
+
+### Ongoing — every few days
+New recordings arrive → repeat **Stage 2** (and **Stage 3–4** as you label more).
+Segmentation stays locked, so labels persist; only new events get added.
+
+> Tweaking **snippet** settings (padding/length/naming) is safe anytime — set
+> `run.reprocess: true` once to re-cut clips without losing labels. Only
+> **segmentation** changes are guarded.
 
 ---
 

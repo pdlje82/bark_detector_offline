@@ -113,6 +113,15 @@ score — the panel's cross-validated accuracy is the reliable figure.
 
 ## Behaviour notes
 
+- **Window playback & scrubbing** — the zoomed (ROI) timeline has a real-time
+  transport: press play and the clips in view play back with the *actual*
+  silence between them (a 5 s gap plays as 5 s of silence), a red playhead
+  sweeping the strip. Tap/click the strip to set the play cursor anywhere; drag
+  the strip left/right (mouse or finger) to pan the window. When the playhead
+  runs past the right edge during playback, the window pages forward to follow
+  it. Real-time at every zoom. (When a clip file is missing — e.g. this
+  prototype — its slot is silent but the clock still runs.)
+
 - **Missing / unreadable data** — if `results.json` cannot be fetched or parsed,
   the page shows a friendly "Couldn't load the evidence" message with a retry
   button instead of a blank screen.

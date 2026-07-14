@@ -141,7 +141,15 @@
   .caps { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin: 16px 0 6px; }
   .strip { position: relative; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
   .strip.ov { height: 40px; cursor: pointer; }
-  .strip.roi { height: 50px; }
+  .strip.roi { height: 50px; cursor: grab; touch-action: none; user-select: none; }
+  .strip.roi.dragging { cursor: grabbing; }
+  .playhead { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #e0483a; box-shadow: 0 0 0 1px rgba(224,72,58,0.25); pointer-events: none; z-index: 3; }
+  .playhead::before { content: ""; position: absolute; top: -1px; left: 50%; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #e0483a; }
+  .wintransport { display: flex; align-items: center; gap: 12px; margin: 10px 0 6px; }
+  .wintransport button { width: 40px; height: 40px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 9px; font-size: 15px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .wintransport button:hover { border-color: var(--faint); }
+  .wintransport .wt { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .wintransport .wt b { color: var(--ink); font-weight: 600; }
   .seg { position: absolute; top: 0; bottom: 0; }
   .tick { position: absolute; }
   .ov .tick { top: 6px; bottom: 6px; width: 2px; margin-left: -1px; }
@@ -155,7 +163,7 @@
   .zoom .zl { font-family: var(--mono); font-size: 15px; font-weight: 600; }
   .zoom .zr { font-family: var(--mono); font-size: 12px; color: var(--faint); }
 
-  .evlist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; max-height: 572px; overflow-y: auto; scrollbar-width: thin; }
+  .evlist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; max-height: 458px; overflow-y: auto; scrollbar-width: thin; }
   .evlist::-webkit-scrollbar { width: 8px; }
   .evlist::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 4px; }
   .evcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); background: var(--field); border-radius: 11px; cursor: pointer; }
@@ -185,7 +193,8 @@
   .clipnote.bad { color: #a83a29; }
 
   /* ---- controls + table ---- */
-  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 16px; font-size: 13px; }
+  .controls { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; font-size: 13px; }
+  .controls .crow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
   .controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .controls select { font-family: var(--sans); font-size: 13px; padding: 6px 8px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 6px; }
   .controls input[type=range] { width: 120px; accent-color: var(--night); }
@@ -197,7 +206,8 @@
   table.log th { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 0 10px 8px 0; border-bottom: 1.5px solid var(--ink); cursor: pointer; white-space: nowrap; }
   table.log th.r, table.log td.r { text-align: right; }
   table.log th .arr { color: var(--faint); }
-  table.log td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  table.log td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+  table.log td.cls-cell { white-space: nowrap; }
   table.log td.mono { font-family: var(--mono); }
   .logscroll { max-height: 1083px; overflow: auto; }
   table.log thead th { position: sticky; top: 0; background: var(--paper); z-index: 2; }
@@ -340,19 +350,23 @@
           <h2 class="sec">Event log</h2>
         </div>
         <div class="controls" id="controls">
-          <label><input type="checkbox" id="f-night"> Night only</label>
-          <label><input type="checkbox" id="f-day"> Selected day only</label>
-          <label>Class
-            <select id="f-cls"><option value="all">All</option></select>
-          </label>
-          <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
-          <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
-          <label>Status <select id="f-status"><option value="all">All</option><option value="labeled">Labeled</option><option value="unlabeled">Unlabeled</option><option value="confirmed">Confirmed</option><option value="relabeled">Relabeled</option></select></label>
-          <label>Dog <select id="f-dog"><option value="all">All labels</option></select></label>
-          <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
-          <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
-          <span class="shown" id="labelstats"></span>
-          <span class="shown" id="shown"></span>
+          <div class="crow">
+            <label><input type="checkbox" id="f-night"> Night only</label>
+            <label><input type="checkbox" id="f-day"> Selected day only</label>
+            <label>Class
+              <select id="f-cls"><option value="all">All</option></select>
+            </label>
+            <label>Status <select id="f-status"><option value="all">All</option><option value="labeled">Labeled</option><option value="unlabeled">Unlabeled</option><option value="confirmed">Confirmed</option><option value="relabeled">Relabeled</option></select></label>
+            <label>Dog <select id="f-dog"><option value="all">All labels</option></select></label>
+            <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
+            <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
+          </div>
+          <div class="crow">
+            <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
+            <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
+            <span class="shown" id="labelstats"></span>
+            <span class="shown" id="shown"></span>
+          </div>
         </div>
         <div class="stlegend">
           <span><i class="stdot" style="background:transparent;border:1.5px dashed var(--faint)"></i>unlabeled</span>
@@ -399,7 +413,8 @@
     mode: "readonly",
     labels: {},
     pending: {},
-    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all" }
+    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all" },
+    playCursorMs: null
   };
 
   /* ---------- boot ---------- */
@@ -846,7 +861,9 @@
     state._win = { date: dateStr, lo: lo, hi: hi, mid: mid };
     var roiSegs = segsFor(mid, lo, hi, rp);
     var roiRaw = dayEvents.filter(function (o) { var r = o.w.t - mid; return r >= lo && r <= hi; });
-    var roiTicks = roiRaw.map(function (o) { var st = evStatus(o.e); var ring = st !== "unlabeled" ? ";box-shadow:0 0 0 1.5px " + statusMeta(st).c : ""; return '<div class="tick" style="left:' + rp(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + ring + '"></div>'; }).join("");
+    var phHtml = (state.playCursorMs != null && state.playCursorMs >= lo && state.playCursorMs <= hi)
+      ? '<div class="playhead" id="roiPlayhead" style="left:' + rp(state.playCursorMs) + '%"></div>' : "";
+    var roiTicks = roiRaw.map(function (o) { var st = evStatus(o.e); var ring = st !== "unlabeled" ? ";box-shadow:0 0 0 1.5px " + statusMeta(st).c : ""; return '<div class="tick" data-id="' + o.e.id + '" style="left:' + rp(o.w.t - mid) + '%;background:' + intensityColor(o.e.intensity_relative) + ring + '"></div>'; }).join("");
 
     var summary = sum ? (sum.count + " detection" + (sum.count === 1 ? "" : "s") + " \u00b7 " + sum.night_count + " at night") : "No recording this day";
 
@@ -868,10 +885,10 @@
             kv("Loudness", fmtDbfs(selEv.intensity_dbfs)) +
             kv("Rel. intensity", fmtRel(selEv.intensity_relative)) +
           '</div>' +
-          audioHtml(selEv) +
           (state.mode === "label" ? labelBlock(selEv) : "") +
         '</div>';
     }
+    var playerHtml = (selEv && wall(selEv.abs_start_local).date === dateStr) ? ('<div class="caps">Selected clip</div>' + audioHtml(selEv)) : "";
 
     wrap.innerHTML =
       '<div class="daytitle">' + esc(dayLabel(dateStr)) + '</div>' +
@@ -887,14 +904,18 @@
         '<button data-action="zoomIn"' + (state.roiZoom >= STEPS.length - 1 ? " disabled" : "") + '>+</button>' +
         '<div><span class="zl">' + spanLabel(span) + '</span> <span class="zr">' + msToHM(lo) + " \u2013 " + msToHM(hi) + '</span></div>' +
       '</div>' +
-      '<div class="strip roi">' + roiSegs + roiTicks + '</div>' +
+      '<div class="strip roi" id="roiStrip">' + roiSegs + roiTicks + phHtml + '</div>' +
       '<div class="axis"><span style="left:0">' + msToHM(lo) + '</span><span style="right:0">' + msToHM(hi) + '</span></div>' +
+      '<div class="wintransport"><button id="winPlayBtn" data-action="winPlay" title="Play the window in real time">' + (TP.playing ? "\u23f8" : "\u25b6") + '</button><span class="wt" id="winCursor"></span></div>' +
       '<div class="caps">Events in window</div>' +
       (roiRaw.length ? '<div class="evlist">' + sortRows(roiRaw.slice()).map(function (o) { return evCard(o.e, o.w); }).join("") + '</div>'
-                     : '<div class="empty">No events match here \u2014 adjust filters, zoom out, or move the window.</div>');
+                     : '<div class="empty">No events match here \u2014 adjust filters, zoom out, or move the window.</div>') +
+      playerHtml;
 
     // wire audio for the selected event
     var _nl = wrap.querySelector(".evlist"); if (_nl) _nl.scrollTop = prevScroll;
+    wireRoiStrip();
+    updateWinTransport();
     setupAudio(selEv);
   }
 
@@ -925,6 +946,140 @@
       statusDot(e) +
       '<button class="play" data-action="playEvent" data-id="' + e.id + '" title="Play clip" aria-label="Play clip">\u25b6</button>' +
     '</div>';
+  }
+
+  /* ---------- window playback (real-time transport across the day) ---------- */
+  var TP = { ctx: null, sources: [], raf: 0, startPerf: 0, startMs: 0, playing: false, endMs: 0 };
+  var bufCache = {};
+  function ensureCtx() {
+    if (!TP.ctx) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) TP.ctx = new AC(); }
+    return TP.ctx;
+  }
+  function loadBuf(url) {
+    if (bufCache[url]) return bufCache[url];
+    var p = fetch(url).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+      .then(function (ab) { return new Promise(function (res, rej) { TP.ctx.decodeAudioData(ab, res, rej); }); })
+      .catch(function () { return null; }); // missing/undecodable clip -> silent
+    bufCache[url] = p; return p;
+  }
+  function winEvents(fromMs) {
+    if (!state.selDate) return [];
+    var mid = dayMid(state.selDate);
+    return eventsOnDay(state.selDate).filter(function (o) { return eventMatches(o.e); })
+      .map(function (o) { return { e: o.e, ms: o.w.t - mid }; })
+      .filter(function (o) { return o.ms >= fromMs - 1 && o.e.snippet_url; })
+      .sort(function (a, b) { return a.ms - b.ms; });
+  }
+  function stopWindowPlayback(keepCursor) {
+    if (TP.raf) { cancelAnimationFrame(TP.raf); TP.raf = 0; }
+    TP.sources.forEach(function (s) { try { s.stop(); } catch (e) {} });
+    TP.sources = [];
+    TP.playing = false;
+    if (!keepCursor) { /* keep cursor where it is */ }
+    updateWinTransport();
+  }
+  function playWindow() {
+    var ctx = ensureCtx();
+    if (ctx && ctx.state === "suspended") ctx.resume();
+    var startMs = state.playCursorMs != null ? state.playCursorMs : (state._win ? state._win.lo : 0);
+    var evs = winEvents(startMs);
+    if (!evs.length) { state.playCursorMs = startMs; updateWinTransport(); return; }
+    TP.endMs = Math.max.apply(null, evs.map(function (o) { return o.ms + (o.e.duration_sec || 0) * 1000; }));
+    // master clock is wall-time (runs even if audio can't); decode clips best-effort and schedule sound
+    TP.startPerf = performance.now();
+    TP.startMs = startMs;
+    TP.playing = true;
+    updateWinTransport();
+    loopWindow();
+    if (ctx) {
+      Promise.all(evs.map(function (o) { return loadBuf(o.e.snippet_url); })).then(function (bufs) {
+        if (!TP.playing) return;
+        var anchorCtx = ctx.currentTime + 0.05;
+        var elapsed = (performance.now() - TP.startPerf) / 1000; // account for decode time
+        TP.sources = [];
+        evs.forEach(function (o, i) {
+          var buf = bufs[i]; if (!buf) return; // silent gap for missing/undecodable clip
+          var when = anchorCtx + Math.max(0, (o.ms - startMs) / 1000 - elapsed);
+          var src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+          try { src.start(when); TP.sources.push(src); } catch (e) {}
+        });
+      });
+    }
+  }
+  function loopWindow() {
+    if (!TP.playing) return;
+    var cursor = TP.startMs + (performance.now() - TP.startPerf);
+    if (cursor >= TP.endMs + 400 || cursor >= DAY) {
+      state.playCursorMs = Math.min(TP.endMs, DAY);
+      stopWindowPlayback(true); renderDay(); return;
+    }
+    state.playCursorMs = cursor;
+    var w = state._win;
+    if (w && cursor > w.hi) {
+      var span = STEPS[state.roiZoom];
+      state.roiCenter = Math.min(DAY - span / 2, Math.max(span / 2, cursor + span / 2));
+      renderDay();
+    } else {
+      var ph = $("#roiPlayhead");
+      if (ph && w) ph.style.left = ((cursor - w.lo) / (w.hi - w.lo) * 100) + "%";
+      updateWinTransport();
+    }
+    TP.raf = requestAnimationFrame(loopWindow);
+  }
+  function updateWinTransport() {
+    var b = $("#winPlayBtn"); if (b) b.textContent = TP.playing ? "\u23f8" : "\u25b6";
+    var t = $("#winCursor");
+    if (t) t.innerHTML = state.playCursorMs != null ? ("cursor <b>" + msToHMS(state.playCursorMs) + "</b>") : "tap the strip to set the play cursor";
+  }
+  function msToHMS(ms) { ms = Math.max(0, Math.min(DAY, ms)); var s = Math.floor(ms / 1000); return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60); }
+  function toggleWindowPlay() { if (TP.playing) stopWindowPlayback(true); else playWindow(); }
+  function setPlayCursor(ms) {
+    state.playCursorMs = Math.max(0, Math.min(DAY, ms));
+    if (TP.playing) { stopWindowPlayback(true); playWindow(); } // re-anchor transport at new cursor
+    else { var w = state._win, ph = $("#roiPlayhead");
+      if (w && state.playCursorMs >= w.lo && state.playCursorMs <= w.hi) {
+        if (!ph) { renderDay(); } else { ph.style.left = ((state.playCursorMs - w.lo) / (w.hi - w.lo) * 100) + "%"; }
+      } else { renderDay(); }
+      updateWinTransport();
+    }
+  }
+  // pan the ROI window + tap-to-select / tap-to-set-cursor (mouse + touch)
+  function wireRoiStrip() {
+    var strip = $("#roiStrip"); if (!strip) return;
+    strip.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      var rect = strip.getBoundingClientRect();
+      var w = state._win, span = w.hi - w.lo;
+      var center0 = (w.lo + w.hi) / 2;
+      var tickEl = e.target.closest ? e.target.closest(".tick[data-id]") : null;
+      var drag = { x0: e.clientX, center0: center0, span: span, moved: false, tickId: tickEl ? tickEl.getAttribute("data-id") : null };
+      function move(ev) {
+        var rect2 = (($("#roiStrip") || strip).getBoundingClientRect());
+        var dx = ev.clientX - drag.x0;
+        if (!drag.moved && Math.abs(dx) > 4) { drag.moved = true; var s = $("#roiStrip"); if (s) s.classList.add("dragging"); }
+        if (drag.moved) {
+          var deltaMs = (dx / rect2.width) * drag.span;
+          state.roiCenter = Math.min(DAY - drag.span / 2, Math.max(drag.span / 2, drag.center0 - deltaMs));
+          renderDay();
+        }
+      }
+      function up(ev) {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        var s = $("#roiStrip"); if (s) s.classList.remove("dragging");
+        if (!drag.moved) { // a tap
+          if (drag.tickId != null) { selectEvent(drag.tickId, false); }
+          else {
+            var r = (($("#roiStrip") || strip).getBoundingClientRect());
+            var frac = (ev.clientX - r.left) / r.width;
+            var wnow = state._win;
+            setPlayCursor(wnow.lo + frac * (wnow.hi - wnow.lo));
+          }
+        }
+      }
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
   }
 
   /* ---------- audio ---------- */
@@ -989,6 +1144,8 @@
   }
   function arr(key) { return state.sortKey === key ? (state.sortDir > 0 ? " \u25b2" : " \u25bc") : ""; }
   function renderTable() {
+    var _pl = $("#tableWrap") ? $("#tableWrap").querySelector(".logscroll") : null;
+    var prevLogScroll = _pl ? _pl.scrollTop : 0;
     var rows = filteredRows();
     $("#shown").textContent = rows.length + " of " + R.events.length + " shown";
     var head =
@@ -1022,6 +1179,7 @@
       '</tr>';
     }).join("");
     $("#tableWrap").innerHTML = '<div class="logscroll"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="11" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
+    var _nl = $("#tableWrap").querySelector(".logscroll"); if (_nl) _nl.scrollTop = prevLogScroll;
   }
 
   /* ---------- render: provenance ---------- */
@@ -1108,6 +1266,8 @@
 
   /* ---------- actions ---------- */
   function selectDay(dateStr) {
+    if (TP.playing) stopWindowPlayback(true);
+    state.playCursorMs = null;
     state.selDate = dateStr;
     state.roiCenter = null;
     state.roiZoom = 2;
@@ -1168,6 +1328,7 @@
       else if (a === "selectDay") selectDay(el.getAttribute("data-date"));
       else if (a === "selectEvent") selectEvent(el.getAttribute("data-id"), false);
       else if (a === "playEvent") { ev.stopPropagation(); selectEvent(el.getAttribute("data-id"), true); }
+      else if (a === "winPlay") { toggleWindowPlay(); return; }
       else if (a === "zoomIn") { state.roiZoom = Math.min(STEPS.length - 1, state.roiZoom + 1); renderDay(); }
       else if (a === "zoomOut") { state.roiZoom = Math.max(0, state.roiZoom - 1); renderDay(); }
       else if (a === "moveRoi") {
