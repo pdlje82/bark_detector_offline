@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from datetime import datetime, timezone
 
 from .identify import _canonical_label, _label_to_list
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 
 def _build_app(cfg):
     """Construct the Flask app (imported lazily so the rest of the CLI needs no Flask)."""
-    from flask import Flask, jsonify, request, send_from_directory
+    from flask import Flask, Response, jsonify, request, send_from_directory
 
     frontend = cfg.project_root / "frontend"
     export_dir = cfg.path("export_dir")
@@ -73,6 +74,32 @@ def _build_app(cfg):
         with Store(db_path) as store:
             deleted = store.delete_label(event_key)
         return jsonify({"ok": True, "deleted": deleted})
+
+    # --- continuous region audio (for burst playback; labeling mode only) ---
+    @app.get("/api/audio/<sha>")
+    def audio_region(sha):
+        """Stream a continuous [start, start+dur] cut of a recording's raw audio.
+
+        Lets the frontend play a whole burst (or any span) as one real segment,
+        instead of concatenating padded per-bark clips.
+        """
+        try:
+            start = float(request.args.get("start", "0"))
+            dur = float(request.args.get("dur", "0"))
+        except ValueError:
+            return jsonify({"error": "start/dur must be numbers"}), 400
+        if start < 0 or dur <= 0 or dur > 120:
+            return jsonify({"error": "start >= 0 and 0 < dur <= 120 required"}), 400
+        with Store(db_path) as store:
+            rec = store.recording_by_sha_prefix(sha)
+        if not rec:
+            return jsonify({"error": "unknown recording"}), 404
+        cmd = ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-i", rec["archived_path"],
+               "-t", f"{dur:.3f}", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "5", "-f", "mp3", "-"]
+        out = subprocess.run(cmd, capture_output=True)
+        if out.returncode != 0 or not out.stdout:
+            return jsonify({"error": "audio cut failed"}), 500
+        return Response(out.stdout, mimetype="audio/mpeg")
 
     return app
 

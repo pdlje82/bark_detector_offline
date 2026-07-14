@@ -106,7 +106,7 @@ ingest:
   clock_drift_warn_seconds: 120
 
 snippets:
-  padding_seconds: 2.0
+  padding_seconds: 0.5   # tight clips so a single bark in a burst is clearly the one to label
   quality: 5
   codec: libmp3lame
   channels: 1

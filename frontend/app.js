@@ -632,9 +632,12 @@
   function winEvents(fromMs) {
     if (!state.selDate) return [];
     var mid = dayMid(state.selDate);
+    // Only events inside the visible ROI window [fromMs, win.hi] — never the whole
+    // rest of the day (that floods the server and Web Audio with 1000s of clips).
+    var hi = state._win ? state._win.hi : DAY;
     return eventsOnDay(state.selDate).filter(function (o) { return eventMatches(o.e); })
       .map(function (o) { return { e: o.e, ms: o.w.t - mid }; })
-      .filter(function (o) { return o.ms >= fromMs - 1 && o.e.snippet_url; })
+      .filter(function (o) { return o.ms >= fromMs - 1 && o.ms <= hi && o.e.snippet_url; })
       .sort(function (a, b) { return a.ms - b.ms; });
   }
   function stopWindowPlayback(keepCursor) {
@@ -778,23 +781,55 @@
   function stopBurstPlayback() {
     if (state._burstAudio) { try { state._burstAudio.pause(); } catch (e) {} state._burstAudio = null; }
   }
+  // Offset (s) + recording sha from the stable event_key "<sha12>_<offsetms>".
+  function eventOffset(e) {
+    var k = String(e.key || ""), i = k.indexOf("_");
+    if (i < 0) return null;
+    var off = parseInt(k.slice(i + 1), 10);
+    return isNaN(off) ? null : { sha: k.slice(0, i), off: off / 1000, dur: e.duration_sec || 0 };
+  }
+  // The continuous span [start, dur] covering a burst, if all members share a
+  // recording and have parseable offsets. Returns null -> caller falls back.
+  function burstRegion(mem) {
+    var parts = mem.map(function (o) { return eventOffset(o.e); });
+    if (parts.some(function (p) { return !p; })) return null;
+    var sha = parts[0].sha;
+    if (parts.some(function (p) { return p.sha !== sha; })) return null;   // cross-recording
+    var pad = 0.15;
+    var start = Math.max(0, Math.min.apply(null, parts.map(function (p) { return p.off; })) - pad);
+    var end = Math.max.apply(null, parts.map(function (p) { return p.off + p.dur; })) + pad;
+    return { sha: sha, start: start, dur: Math.max(0.2, end - start) };
+  }
   function playBurst(burstId) {
     if (typeof stopWindowPlayback === "function") { try { stopWindowPlayback(true); } catch (e) {} }
     stopBurstPlayback();
-    var clips = filteredRows()
-      .filter(function (o) { return o.e._burstId === burstId && o.e.snippet_url; })
-      .sort(function (a, b) { return eventStartMs(a.e) - eventStartMs(b.e); })
-      .map(function (o) { return o.e.snippet_url; });
-    if (!clips.length) return;
-    var i = 0, a = state._burstAudio = new Audio();
-    function next() {
-      if (a !== state._burstAudio) return;              // superseded by a newer burst
-      if (i >= clips.length) { state._burstAudio = null; return; }
-      a.src = clips[i++];
-      var p = a.play(); if (p && p.catch) p.catch(next); // skip a clip that won't play
+    var mem = filteredRows()
+      .filter(function (o) { return o.e._burstId === burstId; })
+      .sort(function (a, b) { return eventStartMs(a.e) - eventStartMs(b.e); });
+    if (!mem.length) return;
+    // Preferred: play the whole burst as ONE continuous region from the original
+    // recording (real timing, no repeated padding). Needs the label server.
+    if (state.mode === "label") {
+      var r = burstRegion(mem);
+      if (r) {
+        var url = "api/audio/" + encodeURIComponent(r.sha) + "?start=" + r.start.toFixed(3) + "&dur=" + r.dur.toFixed(3);
+        var a = state._burstAudio = new Audio(url);
+        var p = a.play(); if (p && p.catch) p.catch(function () {});
+        return;
+      }
     }
-    a.addEventListener("ended", next);
-    a.addEventListener("error", next);
+    // Fallback (read-only, or cross-recording burst): sequence the padded clips.
+    var clips = mem.filter(function (o) { return o.e.snippet_url; }).map(function (o) { return o.e.snippet_url; });
+    if (!clips.length) return;
+    var i = 0, aud = state._burstAudio = new Audio();
+    function next() {
+      if (aud !== state._burstAudio) return;
+      if (i >= clips.length) { state._burstAudio = null; return; }
+      aud.src = clips[i++];
+      var pp = aud.play(); if (pp && pp.catch) pp.catch(next);
+    }
+    aud.addEventListener("ended", next);
+    aud.addEventListener("error", next);
     next();
   }
 

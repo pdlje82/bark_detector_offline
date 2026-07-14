@@ -196,6 +196,9 @@ def test_label_api_roundtrip(tmp_path):
     assert client.put("/api/labels/k3", json={}).status_code == 400   # missing label
     client.delete("/api/labels/k1")
     assert "k1" not in client.get("/api/labels").get_json()
+    # region-audio endpoint: validation + unknown-recording (no ffmpeg needed)
+    assert client.get("/api/audio/abc?start=0&dur=0").status_code == 400      # dur must be > 0
+    assert client.get("/api/audio/deadbeef?start=0&dur=1").status_code == 404  # no such recording
     # written straight to the DB
     assert Store(str(db)).all_labels() == {"k2": '["Podenco", "Clooney"]'}
 

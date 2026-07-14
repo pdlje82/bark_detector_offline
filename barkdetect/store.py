@@ -150,6 +150,12 @@ class Store:
         cur = self.conn.execute("SELECT * FROM recordings ORDER BY start_utc")
         return cur.fetchall()
 
+    def recording_by_sha_prefix(self, prefix: str):
+        """Return the recording whose sha256 starts with `prefix` (or None)."""
+        cur = self.conn.execute(
+            "SELECT * FROM recordings WHERE sha256 LIKE ? LIMIT 1", (prefix + "%",))
+        return cur.fetchone()
+
     def mark_processed(self, recording_id: int, processed_at: str,
                        model_name: str, model_version: str, parameters_json: str):
         """Record that a recording was analyzed, storing model + parameter provenance."""
