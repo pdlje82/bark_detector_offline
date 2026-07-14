@@ -358,6 +358,8 @@
           <label>Dog <select id="f-dog"><option value="all">All dogs</option></select></label>
           <span class="rng">Min conf <input type="range" id="f-conf" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-conf-v">0%</span></span>
           <span class="rng">Min rel. int <input type="range" id="f-int" min="0" max="1" step="0.05" value="0"><span class="rv" id="f-int-v">0.00</span></span>
+          <span class="rng" title="Group nearby barks into a burst when the gap between them is at most this">Burst gap <input type="range" id="f-burstgap" min="0.2" max="5" step="0.1" value="2"><span class="rv" id="f-burstgap-v">2.0s</span></span>
+          <span class="rng" title="Show only barks that belong to a burst of at least this many">Min burst <input type="range" id="f-minburst" min="1" max="10" step="1" value="1"><span class="rv" id="f-minburst-v">1</span></span>
         </div>
       </div>
     </section>
@@ -427,7 +429,7 @@
     mode: "readonly",
     labels: {},
     pending: {},
-    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all" },
+    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all", burstGap: 2.0, minBurst: 1 },
     playCursorMs: null
   };
 
@@ -1119,12 +1121,34 @@
   }
 
   /* ---------- render: table ---------- */
+  // Group events into "bursts" by time gap (client-side, adjustable). Annotates
+  // each event with _burstSize so the filter/UI can use it. Recomputed whenever
+  // the burst-gap slider changes; membership is over ALL events (time-ordered),
+  // so a burst is a real acoustic group independent of other filters.
+  function eventStartMs(e) { return Date.parse(e.abs_start_utc); }
+  function computeBursts() {
+    if (!R || !R.events) return;
+    var evs = R.events.slice().sort(function (a, b) { return eventStartMs(a) - eventStartMs(b); });
+    var gapMs = (state.filters.burstGap || 0) * 1000;
+    var bid = 0, lastEnd = null;
+    evs.forEach(function (e) {
+      var s = eventStartMs(e), end = s + (e.duration_sec || 0) * 1000;
+      if (lastEnd === null || (s - lastEnd) > gapMs) { bid++; lastEnd = end; }
+      else { lastEnd = Math.max(lastEnd, end); }
+      e._burstId = bid;
+    });
+    var counts = {};
+    evs.forEach(function (e) { counts[e._burstId] = (counts[e._burstId] || 0) + 1; });
+    evs.forEach(function (e) { e._burstSize = counts[e._burstId]; });
+  }
+
   function eventMatches(e) {
     var f = state.filters;
     if (f.night && !e.night) return false;
     if (f.cls !== "all" && e.class !== f.cls) return false;
     if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
     if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
+    if (f.minBurst > 1 && (e._burstSize || 1) < f.minBurst) return false;
     if (f.status !== "all") { var st = evStatus(e); if (f.status === "labeled" ? st === "unlabeled" : st !== f.status) return false; }
     if (f.dog !== "all" && effectiveDogs(e).indexOf(f.dog) < 0) return false;
     return true;
@@ -1316,6 +1340,8 @@
     sel.addEventListener("change", function (e) { state.filters.cls = e.target.value; renderTable(); renderDay(); });
     $("#f-conf").addEventListener("input", function (e) { state.filters.minConf = parseFloat(e.target.value); $("#f-conf-v").textContent = Math.round(state.filters.minConf * 100) + "%"; renderTable(); renderDay(); });
     $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); renderDay(); });
+    $("#f-burstgap").addEventListener("input", function (e) { state.filters.burstGap = parseFloat(e.target.value); $("#f-burstgap-v").textContent = state.filters.burstGap.toFixed(1) + "s"; computeBursts(); renderTable(); renderDay(); });
+    $("#f-minburst").addEventListener("input", function (e) { state.filters.minBurst = parseInt(e.target.value, 10); $("#f-minburst-v").textContent = String(state.filters.minBurst); renderTable(); renderDay(); });
     $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderTable(); renderDay(); });
     $("#f-dog").addEventListener("change", function (e) { state.filters.dog = e.target.value; renderTable(); renderDay(); });
     $("#f-sort").addEventListener("change", function (e) { state.sortKey = e.target.value; applySort(); });
@@ -1367,6 +1393,7 @@
     classes = R.events.map(function (e) { return e.class; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).sort();
     // labels come from the API (authoritative) when reachable; otherwise read-only
     state.labels = (state.mode === "label" && state.apiLabels) ? state.apiLabels : {};
+    computeBursts();   // annotate events with _burstSize for the burst filter
 
     // default selected day: first day with events, else first recorded day, else first month day
     if (R.daily_summary.length) state.selDate = R.daily_summary[0].date;
