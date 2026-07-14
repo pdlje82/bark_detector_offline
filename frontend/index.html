@@ -224,6 +224,10 @@
   .tag { font-family: var(--mono); font-size: 10px; color: var(--night); margin-left: 6px; }
   .playbtn { background: none; border: 1px solid var(--line2); border-radius: 6px; width: 30px; height: 30px; cursor: pointer; font-size: 12px; color: var(--ink); }
   .playbtn[disabled] { opacity: 0.35; cursor: default; }
+  .log tr.bursthdr td { background: var(--panel2); border-top: 1px solid var(--line2); padding: 7px 10px; }
+  .log tr.bursthdr .bh { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .log tr.bursthdr .bh .cnt { font-family: var(--mono); color: var(--ink); }
+  .log tr.bursthdr .bh .rng { font-family: var(--mono); }
 
   /* ---- provenance ---- */
   details.prov { }
@@ -378,6 +382,7 @@
         </div>
         <div class="controls" id="controls">
           <div class="crow">
+            <label title="Group barks that occur close together (per the Burst gap) under a header with a play-all button"><input type="checkbox" id="f-groupburst"> Group by burst</label>
             <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
             <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
             <span class="shown" id="labelstats"></span>
@@ -429,7 +434,7 @@
     mode: "readonly",
     labels: {},
     pending: {},
-    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all", burstGap: 2.0, minBurst: 1 },
+    filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all", burstGap: 2.0, minBurst: 1, groupBurst: false },
     playCursorMs: null
   };
 
@@ -1120,6 +1125,30 @@
     }
   }
 
+  /* ---------- burst playback (sequential clips) ---------- */
+  function stopBurstPlayback() {
+    if (state._burstAudio) { try { state._burstAudio.pause(); } catch (e) {} state._burstAudio = null; }
+  }
+  function playBurst(burstId) {
+    if (typeof stopWindowPlayback === "function") { try { stopWindowPlayback(true); } catch (e) {} }
+    stopBurstPlayback();
+    var clips = filteredRows()
+      .filter(function (o) { return o.e._burstId === burstId && o.e.snippet_url; })
+      .sort(function (a, b) { return eventStartMs(a.e) - eventStartMs(b.e); })
+      .map(function (o) { return o.e.snippet_url; });
+    if (!clips.length) return;
+    var i = 0, a = state._burstAudio = new Audio();
+    function next() {
+      if (a !== state._burstAudio) return;              // superseded by a newer burst
+      if (i >= clips.length) { state._burstAudio = null; return; }
+      a.src = clips[i++];
+      var p = a.play(); if (p && p.catch) p.catch(next); // skip a clip that won't play
+    }
+    a.addEventListener("ended", next);
+    a.addEventListener("error", next);
+    next();
+  }
+
   /* ---------- render: table ---------- */
   // Group events into "bursts" by time gap (client-side, adjustable). Annotates
   // each event with _burstSize so the filter/UI can use it. Recomputed whenever
@@ -1182,6 +1211,48 @@
     return sortRows(rows);
   }
   function arr(key) { return state.sortKey === key ? (state.sortDir > 0 ? " \u25b2" : " \u25bc") : ""; }
+  function rowHtml(o) {
+    var e = o.e, on = e.id === state.selId;
+    return '<tr class="' + (on ? "on" : "") + '">' +
+      '<td data-label="Status">' + statusDot(e) + '</td>' +
+      '<td class="mono" data-label="Time">' + o.w.time + '</td>' +
+      '<td class="mono" data-label="Date" style="color:var(--muted)">' + MON[parseInt(o.w.date.slice(5,7),10)-1] + " " + parseInt(o.w.date.slice(8,10),10) + '</td>' +
+      '<td class="cls-cell" data-label="Class"><span class="clsdot" style="background:' + intensityColor(e.intensity_relative) + '"></span>' + esc(e.class) + (e.night ? '<span class="tag">night</span>' : "") + '</td>' +
+      '<td class="mono r" data-label="Dur">' + fmtDur(e.duration_sec) + '</td>' +
+      '<td class="mono r" data-label="Conf">' + fmtConf(e.peak_conf) + '</td>' +
+      '<td class="mono r" data-label="Loudness">' + fmtDbfs(e.intensity_dbfs) + '</td>' +
+      '<td class="mono r" data-label="Rel">' + fmtRel(e.intensity_relative) + '</td>' +
+      '<td data-label="Dog">' + (predHtml(e) || "—") + '</td>' +
+      '<td class="train-only" data-label="Your label">' + labelControl(e) + '</td>' +
+      '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">▶</button></td>' +
+    '</tr>';
+  }
+  function burstHeaderHtml(burstId, mem) {
+    var tally = {};
+    mem.forEach(function (o) { effectiveDogs(o.e).forEach(function (d) { if (!isSpecial(d)) tally[d] = (tally[d] || 0) + 1; }); });
+    var dogs = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; })
+      .map(function (d) { return esc(labelName(d)) + " ×" + tally[d]; }).join(", ");
+    var canPlay = mem.some(function (o) { return o.e.snippet_url; });
+    return '<tr class="bursthdr"><td colspan="11"><div class="bh">' +
+      '<button class="playbtn" data-action="playBurst" data-burst="' + burstId + '"' + (canPlay ? "" : " disabled") + ' title="Play every clip in this burst" aria-label="Play burst">▶</button>' +
+      '<span class="cnt">' + mem.length + ' barks</span>' +
+      '<span class="rng">' + esc(mem[0].w.time) + " – " + esc(mem[mem.length - 1].w.time) + '</span>' +
+      (dogs ? '<span>' + dogs + '</span>' : "") +
+      '</div></td></tr>';
+  }
+  function groupedRowsHtml(rows) {
+    // bucket the filtered rows by burst, order bursts (and members) chronologically
+    var buckets = {}, order = [];
+    rows.forEach(function (o) { var b = o.e._burstId; if (!(b in buckets)) { buckets[b] = []; order.push(b); } buckets[b].push(o); });
+    var minT = function (arr) { return Math.min.apply(null, arr.map(function (o) { return eventStartMs(o.e); })); };
+    order.sort(function (b1, b2) { return minT(buckets[b1]) - minT(buckets[b2]); });
+    return order.map(function (b) {
+      var mem = buckets[b].slice().sort(function (a, c) { return eventStartMs(a.e) - eventStartMs(c.e); });
+      var header = mem.length >= 2 ? burstHeaderHtml(b, mem) : "";   // no header for lone barks
+      return header + mem.map(rowHtml).join("");
+    }).join("");
+  }
+
   function renderTable() {
     var _pl = $("#tableWrap") ? $("#tableWrap").querySelector(".logscroll") : null;
     var prevLogScroll = _pl ? _pl.scrollTop : 0;
@@ -1201,22 +1272,7 @@
         '<th class="train-only">Your label</th>' +
         '<th></th>' +
       '</tr></thead>';
-    var body = rows.map(function (o) {
-      var e = o.e, on = e.id === state.selId;
-      return '<tr class="' + (on ? "on" : "") + '">' +
-        '<td data-label="Status">' + statusDot(e) + '</td>' +
-        '<td class="mono" data-label="Time">' + o.w.time + '</td>' +
-        '<td class="mono" data-label="Date" style="color:var(--muted)">' + MON[parseInt(o.w.date.slice(5,7),10)-1] + " " + parseInt(o.w.date.slice(8,10),10) + '</td>' +
-        '<td class="cls-cell" data-label="Class"><span class="clsdot" style="background:' + intensityColor(e.intensity_relative) + '"></span>' + esc(e.class) + (e.night ? '<span class="tag">night</span>' : "") + '</td>' +
-        '<td class="mono r" data-label="Dur">' + fmtDur(e.duration_sec) + '</td>' +
-        '<td class="mono r" data-label="Conf">' + fmtConf(e.peak_conf) + '</td>' +
-        '<td class="mono r" data-label="Loudness">' + fmtDbfs(e.intensity_dbfs) + '</td>' +
-        '<td class="mono r" data-label="Rel">' + fmtRel(e.intensity_relative) + '</td>' +
-        '<td data-label="Dog">' + (predHtml(e) || "\u2014") + '</td>' +
-        '<td class="train-only" data-label="Your label">' + labelControl(e) + '</td>' +
-        '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">\u25b6</button></td>' +
-      '</tr>';
-    }).join("");
+    var body = state.filters.groupBurst ? groupedRowsHtml(rows) : rows.map(rowHtml).join("");
     $("#tableWrap").innerHTML = '<div class="logscroll"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="11" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
     var _nl = $("#tableWrap").querySelector(".logscroll"); if (_nl) _nl.scrollTop = prevLogScroll;
   }
@@ -1342,6 +1398,7 @@
     $("#f-int").addEventListener("input", function (e) { state.filters.minInt = parseFloat(e.target.value); $("#f-int-v").textContent = state.filters.minInt.toFixed(2); renderTable(); renderDay(); });
     $("#f-burstgap").addEventListener("input", function (e) { state.filters.burstGap = parseFloat(e.target.value); $("#f-burstgap-v").textContent = state.filters.burstGap.toFixed(1) + "s"; computeBursts(); renderTable(); renderDay(); });
     $("#f-minburst").addEventListener("input", function (e) { state.filters.minBurst = parseInt(e.target.value, 10); $("#f-minburst-v").textContent = String(state.filters.minBurst); renderTable(); renderDay(); });
+    $("#f-groupburst").addEventListener("change", function (e) { state.filters.groupBurst = e.target.checked; renderTable(); });
     $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderTable(); renderDay(); });
     $("#f-dog").addEventListener("change", function (e) { state.filters.dog = e.target.value; renderTable(); renderDay(); });
     $("#f-sort").addEventListener("change", function (e) { state.sortKey = e.target.value; applySort(); });
@@ -1369,6 +1426,7 @@
       else if (a === "selectDay") selectDay(el.getAttribute("data-date"));
       else if (a === "selectEvent") selectEvent(el.getAttribute("data-id"), false);
       else if (a === "playEvent") { ev.stopPropagation(); selectEvent(el.getAttribute("data-id"), true); }
+      else if (a === "playBurst") { ev.stopPropagation(); playBurst(parseInt(el.getAttribute("data-burst"), 10)); return; }
       else if (a === "winPlay") { toggleWindowPlay(); return; }
       else if (a === "zoomIn") { state.roiZoom = Math.min(STEPS.length - 1, state.roiZoom + 1); renderDay(); }
       else if (a === "zoomOut") { state.roiZoom = Math.max(0, state.roiZoom - 1); renderDay(); }
