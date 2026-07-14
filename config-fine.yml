@@ -55,8 +55,8 @@ normalization:
 
 detection:
   threshold: 0.15
-  min_event_seconds: 0.10     # FINER: keep briefer single barks (was 0.15)
-  merge_gap_seconds: 0.15     # FINER: split rapid barks instead of merging (was 0.4)
+  min_event_seconds: 0.15     # reset to original — onset slicing (below) does the fine work
+  merge_gap_seconds: 0.4      # reset to original — onset slicing (below) does the fine work
   dog_classes:
     - Dog
     - Bark
@@ -69,6 +69,16 @@ detection:
 intensity:
   metric: rms
   scope: per_file
+
+# THE experiment: onset sub-segmentation ON. Splits each PANNs region into
+# individual barks from the raw waveform, and writes debug plots to inspect it.
+onset:
+  use_onset_detection: true
+  min_interval_seconds: 0.12
+  delta: 0.07
+  debug_plots: true
+  debug_plots_dir: data/onset_debug
+  debug_plots_max: 150
 
 identification:
   enabled: true

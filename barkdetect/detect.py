@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
+from . import onset
 from .audio import normalize_window, stream_windows
 
 log = logging.getLogger(__name__)
@@ -129,8 +130,34 @@ def score_recording(path: str | Path, cfg, model, dog_idx: list[int],
             np.concatenate(all_energy))
 
 
-def extract_events(times, scores, best, energy, dog_class_names, cfg) -> list[dict]:
-    """Turn a per-frame score timeline into discrete bark events."""
+def _event_from_range(i0, i1, t0, t1, scores, best, energy, dog_class_names):
+    """Build one event dict from a half-open frame range [i0, i1) and its times."""
+    seg = scores[i0:i1]
+    if seg.size == 0:
+        return None
+    peak_i = i0 + int(np.argmax(seg))
+    top_class = dog_class_names[int(best[peak_i])]
+    intensity_raw = float(energy[i0:i1].max()) if energy.size else 0.0
+    return {
+        "offset_start_sec": round(float(t0), 3),
+        "offset_end_sec": round(float(t1), 3),
+        "duration_sec": round(float(t1 - t0), 3),
+        "peak_conf": round(float(seg.max()), 4),
+        "mean_conf": round(float(seg.mean()), 4),
+        "top_class": top_class,
+        "intensity_raw": round(intensity_raw, 6),
+    }
+
+
+def extract_events(times, scores, best, energy, dog_class_names, cfg,
+                   audio_path=None) -> list[dict]:
+    """Turn a per-frame score timeline into discrete bark events.
+
+    With onset sub-segmentation enabled (cfg.onset.use_onset_detection and an
+    audio_path), each detected region is further split at bark onsets found in
+    the raw audio, so a burst becomes one event per bark. Per-slice features are
+    recomputed from the same frame arrays.
+    """
     if times.size == 0:
         return []
 
@@ -160,27 +187,44 @@ def extract_events(times, scores, best, energy, dog_class_names, cfg) -> list[di
         else:
             merged.append(r)
 
+    onset_cfg = getattr(cfg, "onset", None)
+    use_onset = bool(audio_path and onset_cfg
+                     and getattr(onset_cfg, "use_onset_detection", False))
+    plotted = 0
+
     events = []
     for a, b in merged:
-        t0, t1 = float(times[a]), float(times[b])
-        # end of the last frame ~ its start plus the local frame step
-        if b + 1 < len(times):
-            t1 = float(times[b + 1])
-        dur = t1 - t0
-        if dur < min_dur:
+        t0 = float(times[a])
+        t1 = float(times[b + 1]) if b + 1 < len(times) else float(times[b])
+
+        if not use_onset:
+            if t1 - t0 >= min_dur:
+                ev = _event_from_range(a, b + 1, t0, t1, scores, best, energy, dog_class_names)
+                if ev:
+                    events.append(ev)
             continue
-        seg = scores[a:b + 1]
-        peak_i = a + int(np.argmax(seg))
-        top_class = dog_class_names[int(best[peak_i])]
-        # loudest instant of this bark in the raw audio (absolute, linear 0..1)
-        intensity_raw = float(energy[a:b + 1].max()) if energy.size else 0.0
-        events.append({
-            "offset_start_sec": round(t0, 3),
-            "offset_end_sec": round(t1, 3),
-            "duration_sec": round(dur, 3),
-            "peak_conf": round(float(seg.max()), 4),
-            "mean_conf": round(float(seg.mean()), 4),
-            "top_class": top_class,
-            "intensity_raw": round(intensity_raw, 6),
-        })
+
+        # Onset slicing: split [t0, t1] at bark onsets in the raw audio.
+        rel = onset.find_onsets(audio_path, t0, t1 - t0, cfg)     # offsets from t0
+        boundaries = [t0 + r for r in rel] + [t1]
+
+        if getattr(onset_cfg, "debug_plots", False) and \
+                plotted < getattr(onset_cfg, "debug_plots_max", 150):
+            try:
+                out = (cfg.resolve_path(onset_cfg.debug_plots_dir)
+                       / f"{Path(str(audio_path)).stem}_{int(t0 * 1000):09d}.png")
+                onset.save_debug_plot(audio_path, t0, t1 - t0, rel, out, cfg)
+                plotted += 1
+            except Exception as e:            # plotting must never break analysis
+                log.debug("onset debug plot failed: %s", e)
+
+        for k in range(len(boundaries) - 1):
+            sa, sb = boundaries[k], boundaries[k + 1]
+            if sb - sa < min_dur:
+                continue
+            i0 = max(a, int(np.searchsorted(times, sa, "left")))
+            i1 = min(b + 1, max(int(np.searchsorted(times, sb, "left")), i0 + 1))
+            ev = _event_from_range(i0, i1, sa, sb, scores, best, energy, dog_class_names)
+            if ev:
+                events.append(ev)
     return events

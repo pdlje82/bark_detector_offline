@@ -74,6 +74,19 @@ def stream_windows(path: str | Path, sr: int, window_sec: float
         proc.wait()
 
 
+def read_segment(path: str | Path, sr: int, start_sec: float, dur_sec: float) -> np.ndarray:
+    """Decode exactly [start, start+dur] of a file to mono float32 via ffmpeg.
+
+    Input seeking (`-ss` before `-i`) makes grabbing a segment from a long
+    recording fast (no decode-from-start). Shared by embeddings and onset.
+    """
+    cmd = ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, start_sec):.3f}",
+           "-i", str(path), "-t", f"{max(0.05, dur_sec):.3f}",
+           "-f", "f32le", "-acodec", "pcm_f32le", "-ac", "1", "-ar", str(sr), "-"]
+    out = subprocess.run(cmd, capture_output=True)
+    return np.frombuffer(out.stdout, dtype=np.float32).copy()
+
+
 def normalize_window(arr: np.ndarray, cfg) -> np.ndarray:
     """Peak-normalize a window so quiet audio is boosted before detection.
 

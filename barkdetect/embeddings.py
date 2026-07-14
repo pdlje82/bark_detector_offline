@@ -9,23 +9,11 @@ rest of the pipeline never changes when the backend is swapped.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import numpy as np
 
-
-def _read_segment(path: str | Path, sr: int, start_sec: float, dur_sec: float) -> np.ndarray:
-    """Decode exactly [start, start+dur] of a file to mono float32 via ffmpeg.
-
-    Uses input seeking (`-ss` before `-i`) so grabbing a segment from a long
-    recording is fast and does not decode from the start.
-    """
-    cmd = ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, start_sec):.3f}",
-           "-i", str(path), "-t", f"{max(0.05, dur_sec):.3f}",
-           "-f", "f32le", "-acodec", "pcm_f32le", "-ac", "1", "-ar", str(sr), "-"]
-    out = subprocess.run(cmd, capture_output=True)
-    return np.frombuffer(out.stdout, dtype=np.float32).copy()
+from .audio import read_segment as _read_segment
 
 
 def _librosa_features(samples: np.ndarray, sr: int) -> np.ndarray:

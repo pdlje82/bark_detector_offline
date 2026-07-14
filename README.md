@@ -60,14 +60,20 @@ The tool is used across a few distinct stages. Each links to its detailed sectio
 
 ### Stage 1 — Tune segmentation (do this *before* labeling)
 Detection boundaries depend on `detection.threshold`, `merge_gap_seconds`,
-`min_event_seconds`. Experiment on a small batch to find good values, listening to
-the clips. Each change re-segments and (once you have labels) triggers the
-[segmentation guard](#the-segmentation-guard). **Lock these before labeling a lot**,
-because changing them later orphans labels.
+`min_event_seconds`. For **per-bark** granularity (rapid bursts), those knobs hit
+PANNs' resolution limit — use **onset sub-segmentation** (`onset`) instead, which
+splits bursts from the raw waveform. Experiment on a small batch and listen. Do it
+in a **separate dataset** so your main DB/labels are safe — that's what
+`config-fine.yml` is for (its own `paths.root`, `onset.use_onset_detection: true`,
+`debug_plots: true`, on port 8001):
 ```bash
-python -m barkdetect            # steps: [ingest, analyze, export, publish]
-python -m http.server -d data/site 8000   # listen to results
+BARKDETECT_CONFIG=config-fine.yml python -m barkdetect          # build the experiment dataset
+BARKDETECT_CONFIG=config-fine.yml python -m barkdetect serve    # inspect on http://localhost:8001
+#   → check event count jumped, view data/onset_debug/*.png, tune onset.min_interval_seconds / delta
 ```
+Each segmentation change re-segments and (once you have labels) triggers the
+[segmentation guard](#the-segmentation-guard). **Lock segmentation before labeling
+a lot**, because changing it later orphans labels.
 
 ### Stage 2 — Ingest & analyze ([Running](#running-the-pipeline), [How detection works](#how-detection-works-inference))
 Plug in the SD card and run the pipeline. New files are copied, analyzed
@@ -207,6 +213,13 @@ survivor becomes one **event**. Because the timeline is continuous, a bark
 straddling a window boundary is still one event. In parallel, a raw-loudness
 envelope from the **un-normalized** audio is captured on the same timeline; each
 event gets its peak loudness → `intensity_relative` (0–1) and `intensity_dbfs`.
+
+*Optional onset sub-segmentation* (`onset.use_onset_detection`): PANNs' score
+doesn't dip between rapid barks, so a burst is one region. When enabled, each
+region is split at bark **onsets** found in the raw waveform (see `onset`), so a
+burst becomes one event per bark — better for per-slice dog identification.
+Per-slice features are recomputed from the same frame arrays, so everything
+downstream is unchanged, just finer.
 
 **5. Absolute timing, embeddings, snippets, provenance.** Offsets are added to the
 recording start for absolute UTC/local times. A per-event **embedding** is computed
@@ -491,6 +504,21 @@ absolute and comparable across files.
 > Intensity reflects what the mic captured (distance, gain, limiter), not the dog's
 > true loudness. In `per_file` scope even a quiet night's loudest bark reads 1.0 —
 > use `intensity_dbfs` for absolute comparison.
+
+### `onset` — bark sub-segmentation
+
+Splits each detected region into individual barks by peak-picking onsets in the
+raw waveform (PANNs can't resolve rapid bursts). Off in `config.yml`; on in
+`config-fine.yml`. Doesn't change `event_key` semantics.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `use_onset_detection` 🔧 | `false` | Slice regions into per-bark events. |
+| `min_interval_seconds` 🔧 | `0.12` | Merge onsets closer than this (a bark's tail/echo). |
+| `delta` 🔧 | `0.07` | Onset peak-pick sensitivity (higher = fewer, more confident onsets). |
+| `debug_plots` 🔧 | `false` | Save a per-region plot (waveform + onset envelope + marks). |
+| `debug_plots_dir` | `data/onset_debug` | Where debug plots are written. |
+| `debug_plots_max` | `150` | Cap on plots written per run. |
 
 ### `identification` — per-dog training
 

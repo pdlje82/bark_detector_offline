@@ -46,6 +46,11 @@ class Config:
         self.normalization = _to_ns(data["normalization"])
         self.detection = _to_ns(data["detection"])
         self.intensity = _to_ns(data["intensity"])
+        self.onset = _to_ns(data.get("onset", {
+            "use_onset_detection": False, "min_interval_seconds": 0.12,
+            "delta": 0.07, "debug_plots": False,
+            "debug_plots_dir": "data/onset_debug", "debug_plots_max": 150,
+        }))
         self.identification = _to_ns(data["identification"])
         self.ingest = _to_ns(data["ingest"])
         self.snippets = _to_ns(data["snippets"])
@@ -98,6 +103,11 @@ class Config:
             "intensity": {
                 "metric": self.intensity.metric,
                 "scope": self.intensity.scope,
+            },
+            "onset": {
+                "use_onset_detection": self.onset.use_onset_detection,
+                "min_interval_seconds": self.onset.min_interval_seconds,
+                "delta": self.onset.delta,
             },
             "identification": {
                 "enabled": self.identification.enabled,
