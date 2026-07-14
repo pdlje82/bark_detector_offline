@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .config import Config, setup_logging
+from .enhance import enhance
 from .export import export
 from .identify import identify
 from .ingest import ingest
@@ -24,6 +25,7 @@ log = logging.getLogger(__name__)
 # step name -> callable(cfg, store)
 STEP_FUNCS = {
     "ingest": ingest,
+    "enhance": enhance,
     "analyze": analyze,
     "identify": identify,
     "export": export,

@@ -52,6 +52,10 @@ class Config:
             "debug_plots_dir": "data/onset_debug", "debug_plots_max": 150,
         }))
         self.identification = _to_ns(data["identification"])
+        self.enhancement = _to_ns(data.get("enhancement", {
+            "enabled": False, "format": "mp3", "dir": "data/enhanced",
+            "apply_to": ["listen"], "chain": [],
+        }))
         self.ingest = _to_ns(data["ingest"])
         self.snippets = _to_ns(data["snippets"])
         self.coverage = _to_ns(data["coverage"])
@@ -108,6 +112,10 @@ class Config:
                 "use_onset_detection": self.onset.use_onset_detection,
                 "min_interval_seconds": self.onset.min_interval_seconds,
                 "delta": self.onset.delta,
+            },
+            "enhancement": {
+                k: self._raw.get("enhancement", {}).get(k)
+                for k in ("enabled", "format", "apply_to", "chain")
             },
             "identification": {
                 "enabled": self.identification.enabled,

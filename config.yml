@@ -10,6 +10,7 @@ run:
   source: "D:/Projects/dog_bark/temp_input"           # SD card path/folder to ingest MP3s from (used by 'ingest')
   steps:                      # stages to execute, in this order
     - ingest
+    - enhance
     - analyze
     - identify
     - export
@@ -89,6 +90,19 @@ onset:
   debug_plots_dir: data/onset_debug
   debug_plots_max: 150           # cap plots written per run
 
+# Audio enhancement: a per-recording "working copy" produced once by the `enhance`
+# step (loudnorm now; denoise/bandpass wired but off). Single-clip playback and
+# (optionally) the models read it; window/burst playback and loudness use RAW.
+enhancement:
+  enabled: true
+  format: mp3                    # working-copy format (mp3 = small; wav = fastest seek)
+  dir: data/enhanced
+  apply_to: [listen]             # who reads the enhanced copy: listen | detect | embed
+  chain:                         # ordered ffmpeg filters
+    - loudnorm: { I: -16, TP: -1.5, LRA: 11 }   # parity with the old clips
+    # - denoise:  { filter: afftdn }             # available, OFF (tune later)
+    # - bandpass: { low: 150, high: 12000 }
+
 # Per-dog identification. A frozen embedding is computed per bark; a lightweight
 # classifier is trained on YOUR labels (exported from the website as labels.json)
 # and predicts a dog for every event. Human labels are authoritative; model
@@ -124,6 +138,7 @@ ingest:
   clock_drift_warn_seconds: 120
 
 snippets:
+  enabled: false              # write per-bark clip files? off = playback is on-demand via the server
   padding_seconds: 2.0        # audio context added before/after each event
   quality: 5                  # libmp3lame VBR quality (0=best/large .. 9=worst/small)
   codec: libmp3lame           # ffmpeg audio codec for the clip

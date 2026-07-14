@@ -39,6 +39,7 @@ runs in order and is independently re-runnable:
 | Step | What it does |
 |------|--------------|
 | `ingest` | Read MP3s from the SD card, hash them, derive the recording start time from the card's creation timestamp, copy each into `data/archive/`. |
+| `enhance` | Render a per-recording **enhanced working copy** (loudnorm now; denoise later) used for single-clip playback and, optionally, the models. Raw archive stays untouched. |
 | `analyze` | Stream each recording through **PANNs** (a pretrained audio-event model), detect bark events, measure per-event loudness, compute a per-event embedding, and cut a playable clip. |
 | `identify` | Read human labels from the DB, train a lightweight per-dog classifier, and predict a dog for every event. |
 | `serve` | Run the local labeling server (not part of a normal run — invoked as `python -m barkdetect serve`). |
@@ -348,7 +349,14 @@ python -m barkdetect serve   # http://127.0.0.1:8000 by default (config `serve.*
 
 Open the URL, turn on training mode, and label. Labels are written **directly to
 `barks.db`** — there is no export/import step, and edits/deletes take effect
-immediately. The database is the single source of truth; clearing the browser
+immediately.
+
+**Audio playback is on-demand** (no clip files needed): the server cuts the exact
+span from disk per click via `GET /api/audio/<sha>?start=&dur=&source=raw|enhanced`.
+Single-clip playback uses `source=enhanced` (the enhanced copy — clean to label);
+window/burst playback uses `source=raw` (the real, continuous original). Each click
+is one short ffmpeg cut (input-seek → tens–hundreds of ms), cached and prefetched,
+so a 50–100-clip session stays snappy even on a small server. The database is the single source of truth; clearing the browser
 loses nothing. The hosted, read-only evidence view (the `publish` bundle) has no
 API and simply shows the labels baked into `results.json`.
 
@@ -404,8 +412,9 @@ lawyer before putting it online.
 
 ```
 data/
-  archive/            immutable copies of the original MP3s
-  snippets/<hash>/    per-event .mp3 clips (referenced by results.json)
+  archive/            immutable copies of the original MP3s (raw source of truth)
+  enhanced/           per-recording enhanced working copies (loudnorm; for clip playback + models)
+  snippets/<hash>/    per-event .mp3 clips — only when snippets.enabled (else audio is on-demand)
   barks.db            SQLite source of truth
   models/             trained dog classifier
   export/results.json frontend input
@@ -638,10 +647,25 @@ raw waveform (PANNs can't resolve rapid bursts). Off in `config.yml`; on in
 | `hash_chunk_bytes` | `1048576` | Read block size when hashing. |
 | `clock_drift_warn_seconds` 🔧 | `120` | Warn if file mtime disagrees with `start + duration` by more than this. |
 
+### `enhancement` — audio working copy
+
+A per-recording enhanced copy (made once by `enhance`) that single-clip playback
+and, optionally, the models read. Window/burst playback and loudness always use
+the raw archive.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` 🔧 | `true` | Build/use the enhanced working copy. |
+| `format` | `mp3` | Working-copy format (`mp3` small, `wav` fastest seek). |
+| `dir` | `data/enhanced` | Where copies are written. |
+| `apply_to` 🔧 | `[listen]` | Who reads the enhanced copy: `listen` (clip playback), and/or `detect`/`embed` (models — off by default; enabling re-triggers the segmentation guard). |
+| `chain` 🔧 | `[loudnorm]` | Ordered ffmpeg filters: `loudnorm`, `denoise` (afftdn), `bandpass` (low/high). Recorded in provenance. |
+
 ### `snippets` — per-event clips
 
 | Key | Default | Meaning |
 |-----|---------|---------|
+| `enabled` 🔧 | `false` | Write per-bark clip files? Off = audio is served **on-demand** by the label server (`/api/audio`). Turn on for a static read-only bundle. |
 | `padding_seconds` 🔧 | `2.0` | Audio context before **and** after each event. |
 | `quality` | `5` | `libmp3lame` VBR quality (0 best/large … 9 worst/small). |
 | `codec` | `libmp3lame` | ffmpeg audio codec. |

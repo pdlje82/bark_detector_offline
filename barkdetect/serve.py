@@ -15,6 +15,7 @@ import logging
 import subprocess
 from datetime import datetime, timezone
 
+from .enhance import enhanced_path, filter_string
 from .identify import _canonical_label, _label_to_list
 from .store import Store
 
@@ -90,16 +91,33 @@ def _build_app(cfg):
             return jsonify({"error": "start/dur must be numbers"}), 400
         if start < 0 or dur <= 0 or dur > 120:
             return jsonify({"error": "start >= 0 and 0 < dur <= 120 required"}), 400
+        source = request.args.get("source", "raw")
         with Store(db_path) as store:
             rec = store.recording_by_sha_prefix(sha)
         if not rec:
             return jsonify({"error": "unknown recording"}), 404
-        cmd = ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-i", rec["archived_path"],
-               "-t", f"{dur:.3f}", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "5", "-f", "mp3", "-"]
+
+        # source=enhanced: read the precomputed enhanced copy; if it's missing,
+        # apply the enhancement chain on the fly from raw. source=raw: the original.
+        input_path, extra_af = rec["archived_path"], ""
+        if source == "enhanced":
+            ep = enhanced_path(cfg, rec["archived_path"])
+            if ep.exists():
+                input_path = str(ep)
+            else:
+                extra_af = filter_string(cfg.enhancement.chain)
+
+        cmd = ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-i", input_path, "-t", f"{dur:.3f}"]
+        if extra_af:
+            cmd += ["-af", extra_af]
+        cmd += ["-ac", "1", "-c:a", "libmp3lame", "-q:a", "5", "-f", "mp3", "-"]
         out = subprocess.run(cmd, capture_output=True)
         if out.returncode != 0 or not out.stdout:
             return jsonify({"error": "audio cut failed"}), 500
-        return Response(out.stdout, mimetype="audio/mpeg")
+        resp = Response(out.stdout, mimetype="audio/mpeg")
+        # (sha,start,dur,source) fully determines the bytes -> cache aggressively
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
 
     return app
 

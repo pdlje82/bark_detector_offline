@@ -616,7 +616,7 @@
   // ==========================================================
   // WINDOW PLAYBACK (REAL-TIME TRANSPORT ACROSS THE DAY)
   // ==========================================================
-  var TP = { ctx: null, sources: [], raf: 0, startPerf: 0, startMs: 0, playing: false, endMs: 0 };
+  var TP = { ctx: null, sources: [], _audio: null, raf: 0, startPerf: 0, startMs: 0, playing: false, endMs: 0 };
   var bufCache = {};
   function ensureCtx() {
     if (!TP.ctx) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) TP.ctx = new AC(); }
@@ -637,13 +637,31 @@
     var hi = state._win ? state._win.hi : DAY;
     return eventsOnDay(state.selDate).filter(function (o) { return eventMatches(o.e); })
       .map(function (o) { return { e: o.e, ms: o.w.t - mid }; })
-      .filter(function (o) { return o.ms >= fromMs - 1 && o.ms <= hi && o.e.snippet_url; })
+      .filter(function (o) { return o.ms >= fromMs - 1 && o.ms <= hi; })
       .sort(function (a, b) { return a.ms - b.ms; });
+  }
+  // Map the in-window events to a single continuous recording region anchored at
+  // startMs (day-ms). Returns null if they parse cross-recording -> caller falls back.
+  function windowRegion(evs, startMs) {
+    var parts = evs.map(function (o) {
+      var k = String(o.e.key || ""), i = k.indexOf("_");
+      if (i < 0) return null;
+      var off = parseInt(k.slice(i + 1), 10);
+      return isNaN(off) ? null : { sha: k.slice(0, i), off: off / 1000, dayMs: o.ms };
+    });
+    if (parts.some(function (p) { return !p; })) return null;
+    var sha = parts[0].sha;
+    if (parts.some(function (p) { return p.sha !== sha; })) return null;
+    var a = parts[0];
+    var startOff = Math.max(0, a.off + (startMs - a.dayMs) / 1000);   // offset at day-time startMs
+    var endMs = Math.min(TP.endMs, state._win ? state._win.hi : DAY);
+    return { sha: sha, start: startOff, dur: Math.max(0.2, (endMs - startMs) / 1000) };
   }
   function stopWindowPlayback(keepCursor) {
     if (TP.raf) { cancelAnimationFrame(TP.raf); TP.raf = 0; }
     TP.sources.forEach(function (s) { try { s.stop(); } catch (e) {} });
     TP.sources = [];
+    if (TP._audio) { try { TP._audio.pause(); } catch (e) {} TP._audio = null; }
     TP.playing = false;
     if (!keepCursor) { /* keep cursor where it is */ }
     updateWinTransport();
@@ -661,13 +679,27 @@
     TP.playing = true;
     updateWinTransport();
     loopWindow();
+
+    // Preferred: one continuous RAW region for the window (real timing, no overlap
+    // /flood). Playhead is driven by loopWindow's wall clock.
+    if (state.mode === "label") {
+      var reg = windowRegion(evs, startMs);
+      if (reg) {
+        var url = "api/audio/" + encodeURIComponent(reg.sha) + "?source=raw&start=" + reg.start.toFixed(3) + "&dur=" + reg.dur.toFixed(3);
+        TP._audio = new Audio(url);
+        var pr = TP._audio.play(); if (pr && pr.catch) pr.catch(function () {});
+        return;
+      }
+    }
+    // Fallback (read-only / cross-recording): schedule the per-bark clips.
     if (ctx) {
-      Promise.all(evs.map(function (o) { return loadBuf(o.e.snippet_url); })).then(function (bufs) {
+      var clipped = evs.filter(function (o) { return o.e.snippet_url; });
+      Promise.all(clipped.map(function (o) { return loadBuf(o.e.snippet_url); })).then(function (bufs) {
         if (!TP.playing) return;
         var anchorCtx = ctx.currentTime + 0.05;
         var elapsed = (performance.now() - TP.startPerf) / 1000; // account for decode time
         TP.sources = [];
-        evs.forEach(function (o, i) {
+        clipped.forEach(function (o, i) {
           var buf = bufs[i]; if (!buf) return; // silent gap for missing/undecodable clip
           var when = anchorCtx + Math.max(0, (o.ms - startMs) / 1000 - elapsed);
           var src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
@@ -755,23 +787,39 @@
   // ==========================================================
   // AUDIO
   // ==========================================================
+  var CLIP_PAD = 0.3;   // seconds of context around a single-bark clip
+  // URL for a single event's clip: ENHANCED region on demand in labeling mode;
+  // the pre-cut snippet file as a fallback (read-only / unparseable key).
+  function clipUrl(e) {
+    if (state.mode === "label") {
+      var o = eventOffset(e);
+      if (o) {
+        var start = Math.max(0, o.off - CLIP_PAD);
+        var dur = (o.dur || 0) + 2 * CLIP_PAD;
+        return "api/audio/" + encodeURIComponent(o.sha) +
+          "?source=enhanced&start=" + start.toFixed(3) + "&dur=" + dur.toFixed(3);
+      }
+    }
+    return e.snippet_url || null;
+  }
   function audioHtml(e) {
-    if (!e.snippet_url) return '<div class="clipnote">No audio clip for this event.</div>';
+    if (!clipUrl(e)) return '<div class="clipnote">No audio for this event.</div>';
     return '<audio id="player" controls preload="none"></audio>' +
-      '<div class="clipnote" id="clipnote">' + esc(e.snippet_url) + '</div>';
+      '<div class="clipnote" id="clipnote"></div>';
   }
   function setupAudio(e) {
     audio = $("#player");
-    if (!audio || !e || !e.snippet_url) return;
-    audio.src = e.snippet_url; // relative to this page
+    var url = clipUrl(e);
+    if (!audio || !url) return;
+    audio.src = url; // relative to this page
     var note = $("#clipnote");
     audio.addEventListener("error", function () {
-      if (note) { note.textContent = "Clip unavailable: " + e.snippet_url; note.className = "clipnote bad"; }
+      if (note) { note.textContent = "Clip unavailable"; note.className = "clipnote bad"; }
     });
     if (state._play) {
       state._play = false;
       var p = audio.play();
-      if (p && p.catch) p.catch(function () { if (note) { note.textContent = "Clip unavailable: " + e.snippet_url; note.className = "clipnote bad"; } });
+      if (p && p.catch) p.catch(function () { if (note) { note.textContent = "Clip unavailable"; note.className = "clipnote bad"; } });
     }
   }
 
@@ -812,7 +860,7 @@
     if (state.mode === "label") {
       var r = burstRegion(mem);
       if (r) {
-        var url = "api/audio/" + encodeURIComponent(r.sha) + "?start=" + r.start.toFixed(3) + "&dur=" + r.dur.toFixed(3);
+        var url = "api/audio/" + encodeURIComponent(r.sha) + "?source=raw&start=" + r.start.toFixed(3) + "&dur=" + r.dur.toFixed(3);
         var a = state._burstAudio = new Audio(url);
         var p = a.play(); if (p && p.catch) p.catch(function () {});
         return;
@@ -1072,6 +1120,21 @@
     if (!inWin) state.roiCenter = t; // only recenter when the event isn't already in view
     state._play = !!play;
     renderCalendar(); renderDay(); renderTable();
+    prefetchNext(e);
+  }
+  // Warm the browser cache with the next event's clip so the next click is instant.
+  function prefetchNext(e) {
+    if (state.mode !== "label") return;
+    try {
+      var rows = filteredRows();
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].e.id === e.id) {
+          var n = rows[i + 1]; var u = n && clipUrl(n.e);
+          if (u) fetch(u).catch(function () {});
+          return;
+        }
+      }
+    } catch (x) { /* prefetch is best-effort */ }
   }
 
   function bindControls() {

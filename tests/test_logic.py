@@ -203,6 +203,27 @@ def test_label_api_roundtrip(tmp_path):
     assert Store(str(db)).all_labels() == {"k2": '["Podenco", "Clooney"]'}
 
 
+def test_enhance_filter_string():
+    from barkdetect.enhance import filter_string
+    chain = [{"loudnorm": {"I": -16, "TP": -1.5, "LRA": 11}},
+             {"bandpass": {"low": 150, "high": 12000}},
+             {"denoise": {"filter": "afftdn"}}]
+    fs = filter_string(chain)
+    assert "loudnorm=I=-16:TP=-1.5:LRA=11" in fs
+    assert "highpass=f=150" in fs and "lowpass=f=12000" in fs
+    assert "afftdn" in fs
+    assert filter_string([]) == ""
+
+
+def test_enhanced_path_resolution(tmp_path):
+    from barkdetect.enhance import enhanced_path
+    cfg = SimpleNamespace(
+        enhancement=SimpleNamespace(dir="enh", format="mp3"),
+        resolve_path=lambda p: tmp_path / str(p))
+    p = enhanced_path(cfg, "/whatever/data/archive/260706_x_ZOOM0007.MP3")
+    assert p == tmp_path / "enh" / "260706_x_ZOOM0007.mp3"
+
+
 def test_delete_and_count_labels(tmp_path):
     from barkdetect.store import Store
     store = Store(tmp_path / "t.db")

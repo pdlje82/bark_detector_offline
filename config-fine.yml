@@ -15,6 +15,7 @@ run:
   source: "D:/Projects/dog_bark/temp_input"   # same raw recordings as the main config
   steps:
     - ingest
+    - enhance
     - analyze
     - identify
     - export
@@ -80,6 +81,14 @@ onset:
   debug_plots_dir: data/onset_debug
   debug_plots_max: 150
 
+enhancement:
+  enabled: true
+  format: mp3
+  dir: data/enhanced
+  apply_to: [listen]
+  chain:
+    - loudnorm: { I: -16, TP: -1.5, LRA: 11 }
+
 identification:
   enabled: true
   embedding: librosa
@@ -106,7 +115,8 @@ ingest:
   clock_drift_warn_seconds: 120
 
 snippets:
-  padding_seconds: 0.5   # tight clips so a single bark in a burst is clearly the one to label
+  enabled: false         # on-demand region playback; no per-bark clip files written
+  padding_seconds: 0.5   # (only used if enabled) tight clips
   quality: 5
   codec: libmp3lame
   channels: 1

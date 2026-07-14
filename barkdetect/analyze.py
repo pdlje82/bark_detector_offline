@@ -84,19 +84,22 @@ def analyze(cfg, store: Store) -> dict:
         log.info("    detect: %.0fs, %d candidate events",
                  perf_counter() - t, len(events))
 
-        # --- snippets ---
+        # --- per-event: embedding, optional clip, persist ---
         t = perf_counter()
         store.clear_events(rec["id"])          # idempotent re-analysis
         identify_on = cfg.identification.enabled
+        snippets_on = getattr(cfg.snippets, "enabled", True)
         for ev in events:
-            event_local = start_local + timedelta(seconds=ev["offset_start_sec"])
-            rel = snippet_relpath(cfg, rec["sha256"], event_local,
-                                  ev["offset_start_sec"], ev["intensity_raw"])
-            extract_snippet(rec["archived_path"], snippets_dir, rel,
-                            ev["offset_start_sec"], ev["duration_sec"], cfg)
             # stable id (independent of intensity/dbfs) used to join human labels
             ms = int(round(ev["offset_start_sec"] * 1000))
             event_key = f"{rec['sha256'][:12]}_{ms:09d}"
+            rel = None
+            if snippets_on:
+                event_local = start_local + timedelta(seconds=ev["offset_start_sec"])
+                rel = snippet_relpath(cfg, rec["sha256"], event_local,
+                                      ev["offset_start_sec"], ev["intensity_raw"])
+                extract_snippet(rec["archived_path"], snippets_dir, rel,
+                                ev["offset_start_sec"], ev["duration_sec"], cfg)
             embedding = None
             if identify_on:
                 vec = embed_segment(rec["archived_path"], ev["offset_start_sec"],
@@ -117,7 +120,8 @@ def analyze(cfg, store: Store) -> dict:
                 "event_key": event_key,
                 "embedding": embedding,
             })
-        log.info("    snippets: %.1fs (%d clips)", perf_counter() - t, len(events))
+        log.info("    per-event: %.1fs (%d events, clips=%s)",
+                 perf_counter() - t, len(events), "on" if snippets_on else "off")
 
         # --- persist processed state ---
         store.mark_processed(
