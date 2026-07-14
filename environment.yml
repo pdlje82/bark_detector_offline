@@ -12,6 +12,7 @@ dependencies:
   - scikit-learn  # lightweight classifier for per-dog identification
   - joblib        # persists the trained dog classifier
   - flask         # local label server (python -m barkdetect serve)
+  - matplotlib    # onset-detection debug plots
   - mutagen
   - pyyaml
   - tqdm

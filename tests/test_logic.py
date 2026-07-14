@@ -295,6 +295,28 @@ def test_snippet_name_template():
     assert rel == "9ab6bed4511d/120726_170502_000033274_-29dBFS.mp3"
 
 
+def test_enforce_min_interval():
+    from barkdetect.onset import _enforce_min_interval
+    # 0.0 kept; 0.05 dropped (<0.12); 0.20 kept; 0.25 dropped; 0.40 kept
+    assert _enforce_min_interval([0.0, 0.05, 0.20, 0.25, 0.40], 0.12) == [0.0, 0.20, 0.40]
+    assert _enforce_min_interval([0.40, 0.0, 0.20], 0.12) == [0.0, 0.20, 0.40]  # sorts
+    assert _enforce_min_interval([], 0.12) == []
+
+
+def test_onset_flag_gates_slicing():
+    """With use_onset_detection False, extract_events ignores audio_path (unchanged)."""
+    times = np.arange(0, 5, 0.1)
+    scores = np.zeros_like(times); scores[20:40] = 0.8
+    best = np.zeros_like(times, dtype=int)
+    energy = np.zeros_like(times); energy[25] = 0.42
+    cfg = SimpleNamespace(
+        detection=SimpleNamespace(threshold=0.5, merge_gap_seconds=0.4, min_event_seconds=0.15),
+        onset=SimpleNamespace(use_onset_detection=False))
+    events = extract_events(times, scores, best, energy, ["Dog"], cfg, audio_path="ignored.mp3")
+    assert len(events) == 1                    # not sliced — same as onset-off
+    assert events[0]["intensity_raw"] == 0.42
+
+
 def test_frame_energy_rms_and_peak():
     from barkdetect.detect import _frame_energy
     raw = np.array([0.0, 0.0, 1.0, -1.0, 0.5, 0.5, 0.0, 0.0], dtype=np.float32)

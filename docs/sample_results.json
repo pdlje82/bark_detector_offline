@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-07-14T00:37:16.696031+00:00",
+  "generated_at": "2026-07-14T20:57:12.150240+00:00",
   "timezone": "Europe/Berlin",
   "dogs": [
     "Socke",
@@ -91,6 +91,11 @@
     "intensity": {
       "metric": "rms",
       "scope": "per_file"
+    },
+    "onset": {
+      "use_onset_detection": false,
+      "min_interval_seconds": 0.12,
+      "delta": 0.07
     },
     "identification": {
       "enabled": true,

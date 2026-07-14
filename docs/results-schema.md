@@ -33,6 +33,7 @@ The exact settings used, so any result is reproducible and defensible. Keys:
 `max_gain`, `noise_floor`), `detection` (`threshold`, `min_event_seconds`,
 `merge_gap_seconds`, `dog_classes[]`), `audio` (`sample_rate`, `window_seconds`),
 `intensity` (`metric` = `rms`|`peak`, `scope` = `per_file`|`global`),
+`onset` (`use_onset_detection` bool, `min_interval_seconds`, `delta`),
 `snippets` (`normalized` bool, `target_lufs`). Treat as display-only key/values.
 
 ## `recordings[]`

@@ -78,6 +78,17 @@ intensity:
   metric: rms                 # rms (perceived energy) | peak (max amplitude)
   scope: per_file             # per_file (loudest bark in each file = 1.0) | global (across all files)
 
+# Onset sub-segmentation: split each detected region into individual barks by
+# peak-picking onsets in the RAW audio (PANNs can't resolve rapid bursts). OFF
+# here; enabled in config-fine.yml for experimentation.
+onset:
+  use_onset_detection: false     # slice regions into per-bark events
+  min_interval_seconds: 0.12     # merge onsets closer than this (a bark's tail/echo)
+  delta: 0.07                    # onset peak-pick sensitivity (higher = fewer onsets)
+  debug_plots: false             # save per-region onset plots (waveform + envelope + marks)
+  debug_plots_dir: data/onset_debug
+  debug_plots_max: 150           # cap plots written per run
+
 # Per-dog identification. A frozen embedding is computed per bark; a lightweight
 # classifier is trained on YOUR labels (exported from the website as labels.json)
 # and predicts a dog for every event. Human labels are authoritative; model

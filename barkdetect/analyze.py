@@ -79,7 +79,8 @@ def analyze(cfg, store: Store) -> dict:
         t = perf_counter()
         times, scores, best, energy = detect.score_recording(
             rec["archived_path"], cfg, model, dog_idx, duration_sec=dur)
-        events = detect.extract_events(times, scores, best, energy, dog_names, cfg)
+        events = detect.extract_events(times, scores, best, energy, dog_names, cfg,
+                                       audio_path=rec["archived_path"])
         log.info("    detect: %.0fs, %d candidate events",
                  perf_counter() - t, len(events))
 
