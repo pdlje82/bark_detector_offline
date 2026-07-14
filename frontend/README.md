@@ -55,9 +55,13 @@ beyond the existing `fetch('./results.json')`.
 
 - **Roster** — label options come from `RESULTS.dogs`, plus three fixed extras:
   *Unsure*, *Multiple dogs*, and *Not a dog (false positive)*.
-- **Labeling** — each event in the table and detail gets a label control next to
-  its play button. Selections are stored in `localStorage` keyed by the event's
-  `key`, so they survive reloads.
+- **Labeling** — each event in the table and detail gets a multi-select label
+  control (chips) next to its play button. Dog names (from `RESULTS.dogs`) are
+  multi-toggle — tag two dogs when two are barking — while the three specials
+  (Unsure / Multiple dogs / Not a dog) are mutually exclusive and clear any dog
+  selection (and vice-versa). Selections are stored in `localStorage` keyed by
+  the event's `key`; the value is a **string** for a single dog/option or an
+  **array** of names for several dogs. They survive reloads.
 - **Status at a glance** — every event shows a status dot in **both** modes (in the
   table, the detail card, the 24h timeline ticks, and the calendar): *unlabeled*
   (hollow), *confirmed* = the human label matches the model suggestion (green),
@@ -76,8 +80,10 @@ beyond the existing `fetch('./results.json')`.
 
   ```json
   { "schema": 1, "exported_at": "<ISO>",
-    "labels": { "<event.key>": "rex", "<event.key>": "not_a_dog" } }
+    "labels": { "<event.key.a>": "Rex", "<event.key.b>": ["Rex", "Bella"] } }
   ```
+
+  Values are a string (one dog/option) or an array of names (several dogs).
 
 Labels live only in the browser (localStorage) and in the exported file; the
 page never writes back to `results.json` or the backend.

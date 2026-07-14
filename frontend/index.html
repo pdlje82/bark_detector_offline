@@ -199,6 +199,8 @@
   table.log th .arr { color: var(--faint); }
   table.log td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
   table.log td.mono { font-family: var(--mono); }
+  .logscroll { max-height: 1083px; overflow: auto; }
+  table.log thead th { position: sticky; top: 0; background: var(--paper); z-index: 2; }
   table.log tr.on td { background: var(--panel2); }
   .clsdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 7px; vertical-align: baseline; }
   .tag { font-family: var(--mono); font-size: 10px; color: var(--night); margin-left: 6px; }
@@ -235,6 +237,12 @@
   .mylabel.none { color: var(--faint); border: 1px dashed var(--line2); }
   .mylabel.set { color: var(--paper); background: var(--ink); }
   select.labelsel { font-family: var(--sans); font-size: 12px; padding: 5px 7px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 6px; max-width: 170px; }
+  .lctrl { display: flex; flex-direction: column; gap: 6px; }
+  .lcgroup { display: flex; flex-wrap: wrap; gap: 5px; }
+  .lchip { font-family: var(--sans); font-size: 12px; padding: 4px 9px; border: 1px solid var(--line2); background: var(--field); color: var(--ink); border-radius: 999px; cursor: pointer; line-height: 1.2; }
+  .lchip:hover { border-color: var(--faint); }
+  .lchip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .lchip.special.on { background: #c98a3e; border-color: #c98a3e; color: #fff; }
   .labelrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
   .labelrow .lk { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .shortcuts { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 8px; line-height: 1.6; }
@@ -497,10 +505,16 @@
   function saveLabels(m) { try { localStorage.setItem(LABELS_KEY, JSON.stringify(m)); } catch (e) {} }
   function evKey(e) { return e.key != null ? String(e.key) : ("id:" + e.id); }
   function eventByKey(key) { for (var i = 0; i < R.events.length; i++) if (evKey(R.events[i]) === key) return R.events[i]; return null; }
+  function isSpecial(id) { return id === "unsure" || id === "multiple" || id === "not_a_dog"; }
+  function labelToArray(v) { if (v == null || v === "") return []; return Array.isArray(v) ? v.slice() : [v]; }
+  function labelDisplay(arr) { return arr.map(function (id) { return labelName(id); }).join(", "); }
+  function eventDogs(e) { if (Array.isArray(e.dog_labels) && e.dog_labels.length) return e.dog_labels.slice(); if (e.dog_label != null && e.dog_label !== "") return [e.dog_label]; return []; }
+  function sameSet(a, b) { if (a.length !== b.length) return false; var sa = a.slice().sort(), sb = b.slice().sort(); for (var i = 0; i < sa.length; i++) if (String(sa[i]) !== String(sb[i])) return false; return true; }
   function evStatus(e) {
-    var v = state.labels[evKey(e)];
-    if (!v) return "unlabeled";
-    if (e.dog_label != null && e.dog_label !== "" && String(v) === String(e.dog_label)) return "confirmed";
+    var cur = labelToArray(state.labels[evKey(e)]);
+    if (!cur.length) return "unlabeled";
+    var model = eventDogs(e);
+    if (model.length && sameSet(cur, model)) return "confirmed";
     return "relabeled";
   }
   function statusMeta(st) {
@@ -548,26 +562,56 @@
     return o ? o.name : String(id);
   }
   function predHtml(e) {
-    if (e.dog_label == null || e.dog_label === "") return "";
-    var conf = e.dog_confidence != null ? Math.round(e.dog_confidence * 100) + "%" : "";
+    var dogs = eventDogs(e);
+    if (!dogs.length) return "";
     var human = e.dog_label_source === "human";
+    var conf = e.dog_confidence != null ? Math.round(e.dog_confidence * 100) + "%" : "";
     var title = human ? "Confirmed by a listener." : "Suggested by the dog model. Per-event confidence is a raw, over-confident score \u2014 see the Dog identification reliability panel for the cross-validated accuracy, which is the reliable figure.";
-    return '<span class="pred ' + (human ? "confirmed" : "suggested") + '" title="' + esc(title) + '">' +
-      esc(labelName(e.dog_label)) + (conf ? " \u00b7 " + conf : "") +
-      (human ? "" : '<span class="ptag">suggested</span>') + '</span>';
+    return dogs.map(function (d, i) {
+      var showConf = !human && conf && i === 0;
+      return '<span class="pred ' + (human ? "confirmed" : "suggested") + '" title="' + esc(title) + '">' +
+        esc(labelName(d)) + (showConf ? " \u00b7 " + conf : "") + (human ? "" : '<span class="ptag">suggested</span>') + '</span>';
+    }).join(" ");
   }
-  function labelSelect(e) {
-    var cur = state.labels[evKey(e)] || "";
-    var opts = '<option value="">\u2014 label \u2014</option>' + labelOptions().map(function (o) {
-      return '<option value="' + esc(o.id) + '"' + (String(o.id) === String(cur) ? " selected" : "") + '>' + esc(o.name) + '</option>';
+  function labelControl(e) {
+    var key = evKey(e);
+    var cur = labelToArray(state.labels[key]);
+    var dogChips = rosterDogs().map(function (o) {
+      var on = cur.indexOf(o.id) >= 0;
+      return '<button type="button" class="lchip' + (on ? " on" : "") + '" data-role="labeltoggle" data-key="' + esc(key) + '" data-id="' + esc(o.id) + '">' + esc(o.name) + '</button>';
     }).join("");
-    return '<select class="labelsel" data-key="' + esc(evKey(e)) + '">' + opts + '</select>';
+    var specials = [{ id: "unsure", name: "Unsure" }, { id: "multiple", name: "Multiple dogs" }, { id: "not_a_dog", name: "Not a dog" }];
+    var spChips = specials.map(function (o) {
+      var on = cur.length === 1 && cur[0] === o.id;
+      return '<button type="button" class="lchip special' + (on ? " on" : "") + '" data-role="labeltoggle" data-key="' + esc(key) + '" data-id="' + esc(o.id) + '">' + esc(o.name) + '</button>';
+    }).join("");
+    return '<div class="lctrl" data-lc="' + esc(key) + '"><div class="lcgroup">' + dogChips + '</div><div class="lcgroup sp">' + spChips + '</div></div>';
   }
   function labelBlock(e) {
-    var cur = state.labels[evKey(e)] || "";
-    return '<div class="labelrow"><span class="lk">Your label</span>' + labelSelect(e) +
-      '<span class="mylabel ' + (cur ? "set" : "none") + '" data-mylabel="' + esc(evKey(e)) + '">' + (cur ? esc(labelName(cur)) : "unlabeled") + '</span></div>' +
-      '<div class="shortcuts">1\u20139 assign \u00b7 0 clear \u00b7 Space play/pause \u00b7 J / K (or \u2193 / \u2191) next / prev \u00b7 N next unlabeled</div>';
+    var cur = labelToArray(state.labels[evKey(e)]);
+    return '<div class="labelrow"><span class="lk">Your label</span>' + labelControl(e) + '</div>' +
+      '<div class="labelrow"><span class="lk">Current</span><span class="mylabel ' + (cur.length ? "set" : "none") + '" data-mylabel="' + esc(evKey(e)) + '">' + (cur.length ? esc(labelDisplay(cur)) : "unlabeled") + '</span></div>' +
+      '<div class="shortcuts">1\u20139 toggle dog / set special \u00b7 0 clear \u00b7 Space play/pause \u00b7 J / K (or \u2193 / \u2191) next / prev \u00b7 N next unlabeled</div>';
+  }
+  function toggleLabel(key, id) {
+    var cur = labelToArray(state.labels[key]);
+    if (isSpecial(id)) {
+      if (cur.length === 1 && cur[0] === id) delete state.labels[key];
+      else state.labels[key] = id;
+    } else {
+      var dogs = cur.filter(function (x) { return !isSpecial(x); });
+      var idx = dogs.indexOf(id);
+      if (idx >= 0) dogs.splice(idx, 1); else dogs.push(id);
+      if (dogs.length === 0) delete state.labels[key];
+      else state.labels[key] = dogs.length === 1 ? dogs[0] : dogs;
+    }
+    saveLabels(state.labels);
+    applyLabelDom(key);
+  }
+  function clearCurrent() {
+    if (state.selId == null) return;
+    var e = null; for (var i = 0; i < R.events.length; i++) if (R.events[i].id === state.selId) { e = R.events[i]; break; }
+    if (!e) return; var key = evKey(e); delete state.labels[key]; saveLabels(state.labels); applyLabelDom(key);
   }
   function setLabel(key, val, inPlace) {
     if (val === "" || val == null) delete state.labels[key]; else state.labels[key] = val;
@@ -575,15 +619,23 @@
     if (inPlace) applyLabelDom(key); else { renderTable(); renderDay(); updateLabelStats(); }
   }
   function applyLabelDom(key) {
-    var val = state.labels[key] || "";
-    document.querySelectorAll("select.labelsel").forEach(function (s) { if (s.getAttribute("data-key") === key) s.value = val; });
+    var cur = labelToArray(state.labels[key]);
+    document.querySelectorAll(".lctrl").forEach(function (ctrl) {
+      if (ctrl.getAttribute("data-lc") !== key) return;
+      ctrl.querySelectorAll(".lchip").forEach(function (ch) {
+        var id = ch.getAttribute("data-id"), sp = ch.classList.contains("special");
+        var on = sp ? (cur.length === 1 && cur[0] === id) : (cur.indexOf(id) >= 0);
+        ch.classList.toggle("on", on);
+      });
+    });
     document.querySelectorAll(".mylabel[data-mylabel]").forEach(function (el) {
-      if (el.getAttribute("data-mylabel") === key) { el.className = "mylabel " + (val ? "set" : "none"); el.textContent = val ? labelName(val) : "unlabeled"; }
+      if (el.getAttribute("data-mylabel") !== key) return;
+      el.className = "mylabel " + (cur.length ? "set" : "none"); el.textContent = cur.length ? labelDisplay(cur) : "unlabeled";
     });
     updateStatusDom(key);
     updateLabelStats();
     renderCalendar();
-    if (state.filters.status !== "all") renderTable();
+    if (state.filters.status !== "all" || state.filters.dog !== "all") renderTable();
   }
   function updateLabelStats() {
     var el = $("#labelstats"); if (!el) return;
@@ -619,7 +671,7 @@
   function assignCurrent(id) {
     if (state.selId == null) return;
     var e = null; for (var i = 0; i < R.events.length; i++) if (R.events[i].id === state.selId) { e = R.events[i]; break; }
-    if (!e) return; setLabel(evKey(e), id, true);
+    if (!e) return; toggleLabel(evKey(e), id);
   }
   function togglePlay() { if (audio) { if (audio.paused) { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } else audio.pause(); } }
   function onKey(ev) {
@@ -633,7 +685,7 @@
     else if (k === "n" || k === "N") { nextUnlabeled(); ev.preventDefault(); }
     else if (k === " " || k === "Spacebar") { togglePlay(); ev.preventDefault(); }
     else if (k >= "1" && k <= "9") { var i2 = parseInt(k, 10) - 1; if (i2 < opts.length) { assignCurrent(opts[i2].id); ev.preventDefault(); } }
-    else if (k === "0") { assignCurrent(""); ev.preventDefault(); }
+    else if (k === "0") { clearCurrent(); ev.preventDefault(); }
   }
 
   /* ---------- render: summary band ---------- */
@@ -868,7 +920,7 @@
     if (f.minConf > 0 && !(e.peak_conf != null && e.peak_conf >= f.minConf)) return false;
     if (f.minInt > 0 && !(e.intensity_relative != null && e.intensity_relative >= f.minInt)) return false;
     if (f.status !== "all") { var st = evStatus(e); if (f.status === "labeled" ? st === "unlabeled" : st !== f.status) return false; }
-    if (f.dog !== "all" && state.labels[evKey(e)] !== f.dog) return false;
+    if (f.dog !== "all" && labelToArray(state.labels[evKey(e)]).indexOf(f.dog) < 0) return false;
     return true;
   }
   function sortRows(rows) {
@@ -929,11 +981,11 @@
         '<td class="mono r" data-label="Loudness">' + fmtDbfs(e.intensity_dbfs) + '</td>' +
         '<td class="mono r" data-label="Rel">' + fmtRel(e.intensity_relative) + '</td>' +
         '<td data-label="Dog">' + (predHtml(e) || "\u2014") + '</td>' +
-        '<td class="train-only" data-label="Your label">' + labelSelect(e) + '</td>' +
+        '<td class="train-only" data-label="Your label">' + labelControl(e) + '</td>' +
         '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">\u25b6</button></td>' +
       '</tr>';
     }).join("");
-    $("#tableWrap").innerHTML = '<div style="overflow-x:auto"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="11" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
+    $("#tableWrap").innerHTML = '<div class="logscroll"><table class="log">' + head + '<tbody>' + (body || '<tr><td colspan="11" style="color:var(--faint);padding:18px 0">No events match the current filters.</td></tr>') + '</tbody></table></div>';
   }
 
   /* ---------- render: provenance ---------- */
@@ -1056,7 +1108,7 @@
     $("#f-sort").addEventListener("change", function (e) { state.sortKey = e.target.value; applySort(); });
 
     $("#root").addEventListener("change", function (ev) {
-      var s = ev.target.closest && ev.target.closest("select.labelsel");
+      var s = ev.target.closest && ev.target.closest("nonexistent-labelsel");
       if (s) setLabel(s.getAttribute("data-key"), s.value, true);
     });
     document.addEventListener("keydown", onKey);
@@ -1070,6 +1122,8 @@
         if (state.sortKey === k) state.sortDir *= -1; else { state.sortKey = k; state.sortDir = 1; }
         applySort(); return;
       }
+      var lt = ev.target.closest("[data-role=labeltoggle]");
+      if (lt) { toggleLabel(lt.getAttribute("data-key"), lt.getAttribute("data-id")); return; }
       if (!el) return;
       var a = el.getAttribute("data-action");
       if (a === "toggleTraining") { toggleTraining(); return; }

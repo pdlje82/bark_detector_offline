@@ -237,7 +237,11 @@
       "dog_label": "Cooper",
       "dog_confidence": null,
       "dog_label_source": "human",
-      "snippet_url": "snippets/b7c8d9e0f1a2/060726_010505_000305200_-18dBFS.mp3"
+      "snippet_url": "snippets/b7c8d9e0f1a2/060726_010505_000305200_-18dBFS.mp3",
+      "dog_labels": [
+        "Cooper",
+        "Bella"
+      ]
     },
     {
       "id": 5,
