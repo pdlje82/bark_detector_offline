@@ -127,6 +127,8 @@ class Config:
                 # documents whether listening clips were loudness-boosted
                 "normalized": getattr(self.snippets, "normalize", False),
                 "target_lufs": getattr(self.snippets, "normalize_target_lufs", None),
+                # default context padding for a single-bark clip (frontend seed)
+                "padding_seconds": getattr(self.snippets, "padding_seconds", 0.5),
             },
         }
 

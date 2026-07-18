@@ -55,6 +55,7 @@
         <div class="controls" id="controls">
           <div class="crow">
             <label title="Group barks that occur close together (per the Burst gap) under a header with a play-all button"><input type="checkbox" id="f-groupburst"> Group by burst</label>
+            <span class="rng" title="Context added before/after a single bark when you play its clip">Clip pad <input type="range" id="f-clippad" min="0.1" max="2" step="0.1" value="0.5"><span class="rv" id="f-clippad-v">0.5s</span></span>
             <label>Sort <select id="f-sort"><option value="time">Time</option><option value="conf">Confidence</option><option value="dbfs">Intensity (loudness)</option><option value="dur">Duration</option><option value="class">Class</option></select></label>
             <button class="btn" id="f-sortdir" data-action="toggleSortDir" title="Toggle sort direction">↑</button>
             <span class="shown" id="labelstats"></span>

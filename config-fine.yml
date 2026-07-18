@@ -12,7 +12,7 @@
 # serve.port differ from config.yml.
 
 run:
-  source: "D:/Projects/dog_bark/temp_input"   # same raw recordings as the main config
+  source: "E:/FOLDER10/"   # same raw recordings as the main config
   steps:
     - ingest
     - enhance
@@ -99,10 +99,10 @@ identification:
   dogs:
     - Socke
     - Clooney
-    - Zareth
+#     - Zareth
     - Pastor
     - Podenco
-    - Podenca
+  #   - Podenca
     - PerroCarmen
     - PerroLejano
 

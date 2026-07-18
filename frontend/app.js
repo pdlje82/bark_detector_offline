@@ -45,6 +45,7 @@
     labels: {},
     pending: {},
     filters: { night: false, dayOnly: false, cls: "all", minConf: 0, minInt: 0, status: "all", dog: "all", burstGap: 2.0, minBurst: 1, groupBurst: false },
+    clipPad: 0.5,       // seconds of context around a single-bark clip (user-adjustable)
     playCursorMs: null
   };
 
@@ -787,15 +788,16 @@
   // ==========================================================
   // AUDIO
   // ==========================================================
-  var CLIP_PAD = 0.3;   // seconds of context around a single-bark clip
   // URL for a single event's clip: ENHANCED region on demand in labeling mode;
   // the pre-cut snippet file as a fallback (read-only / unparseable key).
+  // Context padding is user-adjustable (state.clipPad), seeded from config.
   function clipUrl(e) {
     if (state.mode === "label") {
       var o = eventOffset(e);
       if (o) {
-        var start = Math.max(0, o.off - CLIP_PAD);
-        var dur = (o.dur || 0) + 2 * CLIP_PAD;
+        var pad = state.clipPad != null ? state.clipPad : 0.5;
+        var start = Math.max(0, o.off - pad);
+        var dur = (o.dur || 0) + 2 * pad;
         return "api/audio/" + encodeURIComponent(o.sha) +
           "?source=enhanced&start=" + start.toFixed(3) + "&dur=" + dur.toFixed(3);
       }
@@ -958,7 +960,7 @@
       '<td class="mono r" data-label="Rel">' + fmtRel(e.intensity_relative) + '</td>' +
       '<td data-label="Dog">' + (predHtml(e) || "—") + '</td>' +
       '<td class="train-only" data-label="Your label">' + labelControl(e) + '</td>' +
-      '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (e.snippet_url ? "" : " disabled title=\"no clip\"") + ' aria-label="Play clip">▶</button></td>' +
+      '<td class="r" data-label="Clip"><button class="playbtn" data-action="playEvent" data-id="' + e.id + '"' + (clipUrl(e) ? "" : " disabled title=\"no audio\"") + ' aria-label="Play clip">▶</button></td>' +
     '</tr>';
   }
   function burstHeaderHtml(burstId, mem) {
@@ -966,7 +968,7 @@
     mem.forEach(function (o) { effectiveDogs(o.e).forEach(function (d) { if (!isSpecial(d)) tally[d] = (tally[d] || 0) + 1; }); });
     var dogs = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; })
       .map(function (d) { return esc(labelName(d)) + " ×" + tally[d]; }).join(", ");
-    var canPlay = mem.some(function (o) { return o.e.snippet_url; });
+    var canPlay = mem.some(function (o) { return clipUrl(o.e); });
     return '<tr class="bursthdr"><td colspan="11"><div class="bh">' +
       '<button class="playbtn" data-action="playBurst" data-burst="' + burstId + '"' + (canPlay ? "" : " disabled") + ' title="Play every clip in this burst" aria-label="Play burst">▶</button>' +
       '<span class="cnt">' + mem.length + ' barks</span>' +
@@ -1154,6 +1156,16 @@
     $("#f-burstgap").addEventListener("input", function (e) { state.filters.burstGap = parseFloat(e.target.value); $("#f-burstgap-v").textContent = state.filters.burstGap.toFixed(1) + "s"; computeBursts(); renderFiltered(); });
     $("#f-minburst").addEventListener("input", function (e) { state.filters.minBurst = parseInt(e.target.value, 10); $("#f-minburst-v").textContent = String(state.filters.minBurst); renderFiltered(); });
     $("#f-groupburst").addEventListener("change", function (e) { state.filters.groupBurst = e.target.checked; renderTable(); });
+    var cpad = $("#f-clippad");
+    if (cpad) {
+      cpad.value = state.clipPad;
+      $("#f-clippad-v").textContent = state.clipPad.toFixed(1) + "s";
+      cpad.addEventListener("input", function (e) {
+        state.clipPad = parseFloat(e.target.value);
+        $("#f-clippad-v").textContent = state.clipPad.toFixed(1) + "s";
+        try { localStorage.setItem("barkdetect.clipPad", String(state.clipPad)); } catch (x) {}
+      });
+    }
     $("#f-status").addEventListener("change", function (e) { state.filters.status = e.target.value; renderFiltered(); });
     $("#f-dog").addEventListener("change", function (e) { state.filters.dog = e.target.value; renderFiltered(); });
     $("#f-sort").addEventListener("change", function (e) { state.sortKey = e.target.value; applySort(); });
@@ -1183,8 +1195,8 @@
       else if (a === "playEvent") { ev.stopPropagation(); selectEvent(el.getAttribute("data-id"), true); }
       else if (a === "playBurst") { ev.stopPropagation(); playBurst(parseInt(el.getAttribute("data-burst"), 10)); return; }
       else if (a === "winPlay") { toggleWindowPlay(); return; }
-      else if (a === "zoomIn") { state.roiZoom = Math.min(STEPS.length - 1, state.roiZoom + 1); renderDay(); }
-      else if (a === "zoomOut") { state.roiZoom = Math.max(0, state.roiZoom - 1); renderDay(); }
+      else if (a === "zoomIn") { if (state.playCursorMs != null) state.roiCenter = state.playCursorMs; state.roiZoom = Math.min(STEPS.length - 1, state.roiZoom + 1); renderDay(); }
+      else if (a === "zoomOut") { if (state.playCursorMs != null) state.roiCenter = state.playCursorMs; state.roiZoom = Math.max(0, state.roiZoom - 1); renderDay(); }
       else if (a === "moveRoi") {
         var box = el.getBoundingClientRect();
         var frac = (ev.clientX - box.left) / box.width;
@@ -1208,6 +1220,10 @@
     classes = R.events.map(function (e) { return e.class; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).sort();
     // labels come from the API (authoritative) when reachable; otherwise read-only
     state.labels = (state.mode === "label" && state.apiLabels) ? state.apiLabels : {};
+    // clip padding: user override (localStorage) wins, else the config default from results.json
+    var cfgPad = (((R.parameters || {}).snippets || {}).padding_seconds);
+    var saved = null; try { saved = localStorage.getItem("barkdetect.clipPad"); } catch (e) {}
+    state.clipPad = saved != null ? parseFloat(saved) : (cfgPad != null ? cfgPad : 0.5);
     computeBursts();   // annotate events with _burstSize for the burst filter
 
     // default selected day: first day with events, else first recorded day, else first month day
