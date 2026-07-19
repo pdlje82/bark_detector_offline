@@ -15,8 +15,9 @@ from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
 from . import detect
+from .audio import read_segment
 from .detect import _fmt_hms
-from .embeddings import embed_segment
+from .embeddings import embed_samples
 from .guard import enforce_guard, segmentation_fingerprint
 from .snippets import extract_snippet, snippet_relpath
 from .store import Store
@@ -89,6 +90,12 @@ def analyze(cfg, store: Store) -> dict:
         store.clear_events(rec["id"])          # idempotent re-analysis
         identify_on = cfg.identification.enabled
         snippets_on = getattr(cfg.snippets, "enabled", True)
+        sr = cfg.audio.sample_rate
+        # Decode each detection region ONCE and slice per event in memory, so a
+        # burst of N onset sub-events costs one decode instead of N ffmpeg spawns.
+        region_key = None
+        region_seg = None
+        region_start = 0.0
         for ev in events:
             # stable id (independent of intensity/dbfs) used to join human labels
             ms = int(round(ev["offset_start_sec"] * 1000))
@@ -102,8 +109,18 @@ def analyze(cfg, store: Store) -> dict:
                                 ev["offset_start_sec"], ev["duration_sec"], cfg)
             embedding = None
             if identify_on:
-                vec = embed_segment(rec["archived_path"], ev["offset_start_sec"],
-                                    ev["duration_sec"], cfg)
+                r0 = ev.get("region_start_sec", ev["offset_start_sec"])
+                r1 = ev.get("region_end_sec", ev["offset_end_sec"])
+                key = (round(r0, 3), round(r1, 3))
+                if key != region_key:
+                    region_seg = read_segment(rec["archived_path"], sr,
+                                              r0, max(0.05, r1 - r0))
+                    region_key, region_start = key, r0
+                s = int((ev["offset_start_sec"] - region_start) * sr)
+                e = s + int(ev["duration_sec"] * sr)
+                s = max(0, min(s, region_seg.size))
+                e = max(s, min(e, region_seg.size))
+                vec = embed_samples(region_seg[s:e], cfg)
                 embedding = json.dumps([round(float(x), 6) for x in vec])
             store.add_event({
                 "recording_id": rec["id"],

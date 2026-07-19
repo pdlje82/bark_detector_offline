@@ -15,7 +15,6 @@ run:
   source: "E:/FOLDER10/"   # same raw recordings as the main config
   steps:
     - ingest
-    - enhance
     - analyze
     - identify
     - export

@@ -201,6 +201,8 @@ def extract_events(times, scores, best, energy, dog_class_names, cfg,
             if t1 - t0 >= min_dur:
                 ev = _event_from_range(a, b + 1, t0, t1, scores, best, energy, dog_class_names)
                 if ev:
+                    ev["region_start_sec"] = round(t0, 3)
+                    ev["region_end_sec"] = round(t1, 3)
                     events.append(ev)
             continue
 
@@ -226,5 +228,7 @@ def extract_events(times, scores, best, energy, dog_class_names, cfg,
             i1 = min(b + 1, max(int(np.searchsorted(times, sb, "left")), i0 + 1))
             ev = _event_from_range(i0, i1, sa, sb, scores, best, energy, dog_class_names)
             if ev:
+                ev["region_start_sec"] = round(t0, 3)
+                ev["region_end_sec"] = round(t1, 3)
                 events.append(ev)
     return events

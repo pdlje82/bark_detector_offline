@@ -10,7 +10,6 @@ run:
   source: "D:/Projects/dog_bark/temp_input"           # SD card path/folder to ingest MP3s from (used by 'ingest')
   steps:                      # stages to execute, in this order
     - ingest
-    - enhance
     - analyze
     - identify
     - export
@@ -93,6 +92,10 @@ onset:
 # Audio enhancement: a per-recording "working copy" produced once by the `enhance`
 # step (loudnorm now; denoise/bandpass wired but off). Single-clip playback and
 # (optionally) the models read it; window/burst playback and loudness use RAW.
+# Single-clip playback is enhanced ON DEMAND: the serve endpoint applies this
+# chain to just the ~2 s region being played (fast, cached). The 'enhance' step
+# (whole-recording precompute) is left OUT of run.steps above — run it manually
+# (`python -m barkdetect enhance`) only if you want a precomputed copy.
 enhancement:
   enabled: true
   format: mp3                    # working-copy format (mp3 = small; wav = fastest seek)

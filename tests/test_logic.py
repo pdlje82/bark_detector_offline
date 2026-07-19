@@ -367,6 +367,38 @@ def test_coverage_gap_and_contiguous():
     assert abs(gaps[0]["duration_sec"] - 12 * 3600) < 1
 
 
+def test_extract_events_tags_region_bounds():
+    """Every event carries its detection region, so analyze can decode once per region."""
+    times = np.arange(0, 5, 0.1)
+    scores = np.zeros_like(times); scores[20:40] = 0.8
+    best = np.zeros_like(times, dtype=int)
+    energy = np.zeros_like(times)
+    cfg = SimpleNamespace(
+        detection=SimpleNamespace(threshold=0.5, merge_gap_seconds=0.4, min_event_seconds=0.15),
+        onset=SimpleNamespace(use_onset_detection=False))
+    events = extract_events(times, scores, best, energy, ["Dog"], cfg)
+    assert len(events) == 1
+    ev = events[0]
+    # onset off -> the region is the event's own span
+    assert ev["region_start_sec"] == ev["offset_start_sec"]
+    assert ev["region_end_sec"] == ev["offset_end_sec"]
+
+
+def test_embed_samples_matches_features_and_dispatch():
+    """embed_samples embeds an in-memory clip identically to the raw feature fn."""
+    from barkdetect.embeddings import embed_samples, _librosa_features
+    sr = 32000
+    samples = np.random.default_rng(2).standard_normal(sr).astype(np.float32)  # 1s
+    cfg = SimpleNamespace(
+        audio=SimpleNamespace(sample_rate=sr),
+        identification=SimpleNamespace(embedding="librosa"))
+    assert np.allclose(embed_samples(samples, cfg), _librosa_features(samples, sr))
+    cfg.identification.embedding = "panns"           # unimplemented backend still raises
+    import pytest
+    with pytest.raises(NotImplementedError):
+        embed_samples(samples, cfg)
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))

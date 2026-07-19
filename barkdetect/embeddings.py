@@ -38,17 +38,28 @@ def _librosa_features(samples: np.ndarray, sr: int) -> np.ndarray:
     return np.nan_to_num(vec).astype(np.float32)
 
 
-def embed_segment(audio_path: str | Path, start_sec: float, dur_sec: float,
-                  cfg) -> np.ndarray:
-    """Return the embedding vector for one bark event.
+def embed_samples(samples: np.ndarray, cfg) -> np.ndarray:
+    """Return the embedding vector for an already-decoded mono clip.
 
-    Dispatches on cfg.identification.embedding. Only 'librosa' is implemented;
-    'panns'/'aves' raise until wired, keeping the interface stable.
+    Dispatches on cfg.identification.embedding. Use this when the audio is
+    already in memory (e.g. sliced from a single per-region decode) so no extra
+    ffmpeg decode is spawned. Only 'librosa' is implemented; 'panns'/'aves'
+    raise until wired, keeping the interface stable.
     """
     backend = cfg.identification.embedding
-    sr = cfg.audio.sample_rate
     if backend == "librosa":
-        samples = _read_segment(audio_path, sr, start_sec, dur_sec)
-        return _librosa_features(samples, sr)
+        return _librosa_features(samples, cfg.audio.sample_rate)
     raise NotImplementedError(
         f"embedding backend '{backend}' not implemented yet (use 'librosa')")
+
+
+def embed_segment(audio_path: str | Path, start_sec: float, dur_sec: float,
+                  cfg) -> np.ndarray:
+    """Return the embedding vector for one bark event, decoding it from a file.
+
+    Convenience wrapper that decodes exactly [start, start+dur] and embeds it.
+    The analyze path uses `embed_samples` on an in-memory slice instead, to
+    avoid a per-event ffmpeg decode.
+    """
+    samples = _read_segment(audio_path, cfg.audio.sample_rate, start_sec, dur_sec)
+    return embed_samples(samples, cfg)
